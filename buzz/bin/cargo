@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Windows-compatible replacement for the Hermit-managed bin/cargo symlink.
+# See bin/just for the full explanation (core.symlinks=false on this checkout).
+# Delegates to the system rustup-managed cargo, which already respects this
+# repo's rust-toolchain.toml pin.
+set -euo pipefail
+
+for candidate in cargo.exe cargo; do
+  resolved="$(command -v "${candidate}" 2>/dev/null || true)"
+  if [[ -n "${resolved}" && "$(cd "$(dirname "${resolved}")" && pwd)" != "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" ]]; then
+    exec "${resolved}" "$@"
+  fi
+done
+
+localappdata_unix="$(printf '%s' "${USERPROFILE:-}" | sed -e 's#\\#/#g' -e 's#^\([A-Za-z]\):#/\L\1#')"
+rustup_cargo="${localappdata_unix}/.cargo/bin/cargo.exe"
+if [[ -x "${rustup_cargo}" ]]; then
+  exec "${rustup_cargo}" "$@"
+fi
+
+echo "bin/cargo: no working 'cargo' binary found (Hermit symlinks are unusable on this Windows checkout: core.symlinks=false)." >&2
+echo "Install one via https://rustup.rs" >&2
+exit 127

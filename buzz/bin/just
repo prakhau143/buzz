@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Windows-compatible replacement for the Hermit-managed bin/just symlink.
+#
+# This checkout has `git config core.symlinks=false`, so Hermit's real
+# symlink-based tool shims (bin/just -> bin/hermit, etc.) are checked out as
+# inert placeholder text files on Windows instead of working symlinks — see
+# ../docs (swf buzz) LOCAL_DEVELOPMENT.md and bin/README.hermit.md. Rather
+# than pull `just` through Hermit (which itself needs a working shim to
+# bootstrap), delegate straight to a system-installed `just`.
+set -euo pipefail
+
+# Prefer PATH (skips this file, since PATH search falls through non-executable
+# matches — but this file IS executable, so guard against recursing into
+# ourselves by looking for just.exe/just specifically outside this bin/ dir).
+for candidate in just.exe just; do
+  resolved="$(command -v "${candidate}" 2>/dev/null || true)"
+  if [[ -n "${resolved}" && "$(cd "$(dirname "${resolved}")" && pwd)" != "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" ]]; then
+    exec "${resolved}" "$@"
+  fi
+done
+
+# Fall back to the standard per-user WinGet install location.
+localappdata_unix="$(printf '%s' "${LOCALAPPDATA:-}" | sed -e 's#\\#/#g' -e 's#^\([A-Za-z]\):#/\L\1#')"
+winget_just="${localappdata_unix}/Microsoft/WinGet/Links/just.exe"
+if [[ -x "${winget_just}" ]]; then
+  exec "${winget_just}" "$@"
+fi
+
+echo "bin/just: no working 'just' binary found (Hermit symlinks are unusable on this Windows checkout: core.symlinks=false)." >&2
+echo "Install one, e.g.: winget install --id Casey.Just -e" >&2
+exit 127
