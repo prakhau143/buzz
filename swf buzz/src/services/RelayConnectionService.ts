@@ -5,24 +5,108 @@
  * re-issued from an in-memory registry on every (re)connect.
  */
 import { Relay } from "nostr-tools/relay";
+import { matchFilters as nostrToolsMatchFilters } from "nostr-tools/filter";
+import { verifyEvent as nostrToolsVerifyEvent } from "nostr-tools/pure";
 import type {
   Event as NostrToolsEvent,
   EventTemplate as NostrToolsEventTemplate,
   Filter as NostrToolsFilter,
   VerifiedEvent as NostrToolsVerifiedEvent,
 } from "nostr-tools";
-import { useConnectionStore } from "@/stores/connection";
+import { useConnectionStore, type AuthDenial } from "@/stores/connection";
 import { AppError, logError } from "@/services/errors";
 import type { NostrFilter, RawNostrEvent } from "@/protocol/types";
 import type { SignedEvent } from "@/features/signing/types";
 import { getActiveSigningService } from "@/features/signing/signingServiceRegistry";
+import {
+  currentCommunityGeneration,
+  isCurrentCommunitySession,
+} from "@/features/communities/communitySession";
 
 const BASE_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30_000;
 const CONNECT_TIMEOUT_MS = 10_000;
+/** How long to wait for the relay's OK on our NIP-42 AUTH before proceeding without a verdict. */
+const AUTH_VERDICT_TIMEOUT_MS = 2_500;
+
+/**
+ * Reduces a rejection from nostr-tools' `relay.auth()` to "the relay refused this
+ * identity" (its reason string) or `null` when it is not a refusal. No challenge
+ * means the relay does not use NIP-42; a timeout means there is no verdict. Neither
+ * blocks the connection — that is the behaviour before this check existed.
+ */
+export function authDenialFrom(error: unknown): string | null {
+  const reason = error instanceof Error ? error.message : String(error);
+  if (/no challenge was received|auth timed out/i.test(reason)) return null;
+  return reason;
+}
+
+/** Coarse category of a relay AUTH refusal, for the UI to branch on. */
+export function authDenialKind(reason: string): AuthDenial {
+  if (/not a relay member|relay_membership_required/i.test(reason)) return "not_member";
+  if (/banned|blocked/i.test(reason)) return "banned";
+  return "other";
+}
+
+/** User-safe text for a relay AUTH refusal; the raw reason stays in the developer log. */
+export function authDenialMessage(reason: string): string {
+  if (/not a relay member|relay_membership_required/i.test(reason)) {
+    return "This identity isn't a member of this community yet. Ask an admin to add you or send you an invite.";
+  }
+  if (/banned|blocked/i.test(reason)) {
+    return "This identity has been blocked from this community.";
+  }
+  return "The Buzz server didn't accept this identity.";
+}
 
 export interface RelaySubscriptionHandle {
   close(): void;
+}
+
+/**
+ * The relay treats `#h` (channel) as a VIRTUAL tag: for kinds whose channel it
+ * derives server-side — reactions (kind:7) and deletions (kind:5) reference a
+ * target event and carry no `h` tag of their own — it matches `#h` against the
+ * event's stored `channel_id` (buzz-core `filter_match_one`, "fallback ONLY when
+ * the event has no h-tags at all"). nostr-tools, however, re-runs the REQ
+ * filters on every incoming EVENT against the event's LITERAL tags
+ * (`matchFilters`, relay.ts) and silently drops what doesn't match — so every
+ * kind:7 the relay correctly delivered under a `#h` filter was thrown away
+ * before reaching the app (docs/PHASE_3_IMPLEMENTATION_AUDIT.md §18.7 / §19).
+ *
+ * This is the same rule as the relay's, applied on the client: an event that
+ * carries no `h` tag is matched against the filter WITHOUT its `#h` clause —
+ * the relay already scoped it to the subscription's authorized channel — while
+ * every other field (kinds, authors, ids, since/until, `#e`, `#p`, …) is still
+ * checked here. Events that do carry `h` tags get no such leniency.
+ */
+export function matchesAllowingVirtualChannelTag(
+  filters: NostrFilter[],
+  event: RawNostrEvent,
+): boolean {
+  if (nostrToolsMatchFilters(filters as NostrToolsFilter[], event as unknown as NostrToolsEvent)) {
+    return true;
+  }
+  const hasLiteralChannelTag = event.tags.some((tag) => tag[0] === "h");
+  if (hasLiteralChannelTag) return false;
+  const withoutChannelClause = filters
+    .filter((filter) => "#h" in filter)
+    .map(({ "#h": _channel, ...rest }) => rest);
+  return (
+    withoutChannelClause.length > 0 &&
+    nostrToolsMatchFilters(
+      withoutChannelClause as NostrToolsFilter[],
+      event as unknown as NostrToolsEvent,
+    )
+  );
+}
+
+/**
+ * nostr-tools reports its own socket teardown and our own `close()` through the
+ * same `onclose` as a relay `CLOSED` message; those are not refusals.
+ */
+function isConnectionLoss(reason: string): boolean {
+  return /^relay connection|closed by caller|closed automatically/i.test(reason);
 }
 
 interface RegisteredSubscription {
@@ -30,7 +114,11 @@ interface RegisteredSubscription {
   filters: NostrFilter[];
   onEvent: (event: RawNostrEvent) => void;
   onEose?: () => void;
+  /** The relay ended the subscription without EOSE (`CLOSED`, e.g. "auth-required:", "restricted:"). */
+  onClosed?: (reason: string) => void;
   live: RelaySubscriptionHandle | null;
+  /** The community session it was opened under (`communitySession.ts`). */
+  session: number;
 }
 
 export class RelayConnectionService {
@@ -67,7 +155,23 @@ export class RelayConnectionService {
     this.subscriptions.clear();
     this.relay?.close();
     this.relay = null;
+    // Invalidate any in-flight attemptConnect() so a socket that opens after
+    // this call (e.g. a slow handshake started by the previous identity) is
+    // discarded by its generation check instead of becoming "the" connection.
+    this.connectGeneration++;
+    this.url = null;
     this.store.setStatus("disconnected");
+    this.store.setAuthenticatedPubkey(null);
+  }
+
+  /**
+   * True when a socket is open AND its NIP-42 AUTH was signed by `pubkey`. The
+   * strict form of "am I connected as this identity" that identity switching
+   * relies on. A socket the relay never challenged has no authenticated pubkey
+   * and answers `false` here even while `connected`.
+   */
+  isAuthenticatedAs(pubkey: string): boolean {
+    return !!this.relay?.connected && this.store.authenticatedPubkey === pubkey;
   }
 
   /**
@@ -80,7 +184,11 @@ export class RelayConnectionService {
   subscribe(
     id: string | null,
     filters: NostrFilter[],
-    handlers: { onEvent: (event: RawNostrEvent) => void; onEose?: () => void },
+    handlers: {
+      onEvent: (event: RawNostrEvent) => void;
+      onEose?: () => void;
+      onClosed?: (reason: string) => void;
+    },
   ): RelaySubscriptionHandle {
     const subscriptionId = `${id ?? "sub"}-${++this.subscriptionSerial}`;
     const registered: RegisteredSubscription = {
@@ -88,7 +196,9 @@ export class RelayConnectionService {
       filters,
       onEvent: handlers.onEvent,
       onEose: handlers.onEose,
+      onClosed: handlers.onClosed,
       live: null,
+      session: currentCommunityGeneration(),
     };
     this.subscriptions.set(subscriptionId, registered);
     if (this.relay?.connected) {
@@ -130,12 +240,17 @@ export class RelayConnectionService {
       tags: event.tags,
       created_at: event.created_at,
     });
+    // Record WHO signed this socket's AUTH, from the signed event itself — the
+    // one place the answer is real. Identity switching verifies against this,
+    // not against "status === connected" (which is identity-blind).
+    this.store.setAuthenticatedPubkey(signed.pubkey);
     return signed as unknown as NostrToolsVerifiedEvent;
   }
 
   private async attemptConnect(): Promise<void> {
     if (!this.url) return;
     const generation = ++this.connectGeneration;
+    this.store.setAuthDenial(null); // a new attempt starts without the last one's verdict
     this.store.setStatus(this.store.reconnectAttempt > 0 ? "reconnecting" : "connecting");
 
     try {
@@ -168,6 +283,34 @@ export class RelayConnectionService {
         initialAuthAttempted,
         new Promise<void>((resolve) => setTimeout(resolve, 750)),
       ]);
+
+      // The relay's verdict on our AUTH. A closed relay answers a non-member with
+      // `OK false "restricted: not a relay member"` (a banned key with "blocked: …").
+      // nostr-tools reports that only through the auth promise, which nothing else
+      // reads — so without this the app reached "connected" as a non-member, every
+      // subscription silently returned nothing, and login ended "ready" with no role.
+      // `relay.auth()` returns the already-started AUTH promise (it is cached).
+      const outcome = await Promise.race([
+        relay
+          .auth((event) => this.signAuthEvent(event))
+          .then(
+            () => null,
+            (error: unknown) => authDenialFrom(error),
+          ),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), AUTH_VERDICT_TIMEOUT_MS)),
+      ]);
+      if (outcome !== null) {
+        relay.close();
+        if (generation === this.connectGeneration && !this.manuallyClosed) {
+          logError("RelayConnectionService.auth", new AppError("auth_failed", outcome));
+          this.store.setStatus("error", authDenialMessage(outcome));
+          this.store.setAuthDenial(authDenialKind(outcome));
+        }
+        // Deliberately no reconnect: a refused identity is not a transient failure.
+        // (`relay.onclose` is not set yet, so closing here cannot schedule one.)
+        return;
+      }
+
       this.relay = relay;
       relay.onclose = () => this.handleClose(generation);
       this.store.setStatus("connected");
@@ -196,6 +339,7 @@ export class RelayConnectionService {
     for (const sub of this.subscriptions.values()) {
       sub.live = null;
     }
+    // The socket that was authenticated is gone; the reconnect signs a fresh AUTH.
     this.store.setStatus("disconnected", "Lost connection to the Buzz server. Reconnecting…");
     this.scheduleReconnect();
   }
@@ -213,9 +357,42 @@ export class RelayConnectionService {
 
   private issueSubscription(sub: RegisteredSubscription): void {
     if (!this.relay) return;
+    // A subscription from an ended community session never reaches the new
+    // socket, and nothing that was already in flight for it is delivered: an
+    // event from community A must not be written into community B's state.
+    const current = () => isCurrentCommunitySession(sub.session);
+    if (!current()) {
+      this.subscriptions.delete(sub.id);
+      return;
+    }
     const live = this.relay.subscribe(sub.filters as NostrToolsFilter[], {
-      onevent: (evt: NostrToolsEvent) => sub.onEvent(evt as unknown as RawNostrEvent),
-      oneose: sub.onEose,
+      onevent: (evt: NostrToolsEvent) => {
+        if (current()) sub.onEvent(evt as unknown as RawNostrEvent);
+      },
+      oneose: () => {
+        if (current()) sub.onEose?.();
+      },
+      // The relay refused or ended this REQ before EOSE. A dropped socket is
+      // not a refusal — the subscription is re-issued on reconnect — so only a
+      // relay-sent CLOSED reason is passed on.
+      onclose: (reason: string) => {
+        if (current() && !isConnectionLoss(reason)) sub.onClosed?.(reason);
+      },
+      // nostr-tools hands us what IT rejected — for a `#h`-scoped subscription
+      // that includes every relay-delivered kind:7/kind:5 (virtual channel tag,
+      // see matchesAllowingVirtualChannelTag). Re-check with the relay's own
+      // rule and verify the signature ourselves before delivering.
+      oninvalidevent: (rejected: unknown) => {
+        const evt = rejected as NostrToolsEvent;
+        const raw = evt as unknown as RawNostrEvent;
+        if (
+          current() &&
+          matchesAllowingVirtualChannelTag(sub.filters, raw) &&
+          nostrToolsVerifyEvent(evt)
+        ) {
+          sub.onEvent(raw);
+        }
+      },
     });
     sub.live = { close: () => live.close() };
   }

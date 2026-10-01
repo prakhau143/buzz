@@ -6,7 +6,9 @@
  * boundary; the relay enforces every one of these actions independently.
  */
 import { computed } from "vue";
+import AppIcon from "@/components/AppIcon.vue";
 import { canAddChannelMember } from "../channelPermissions";
+import { useEscapeKey } from "@/composables/useEscapeKey";
 import type { MemberRole } from "@/protocol/membership";
 
 const props = defineProps<{ myRole: MemberRole | null; visibility: "open" | "private" }>();
@@ -20,22 +22,27 @@ const emit = defineEmits<{
 }>();
 
 const canAdd = computed(() => canAddChannelMember(props.myRole, props.visibility));
+useEscapeKey(() => emit("close"));
 </script>
 
 <template>
   <div class="menu-overlay" @click.self="emit('close')">
     <div class="menu-card" role="menu">
-      <button type="button" class="menu-item" @click="emit('view-members')">👥 View members</button>
+      <button type="button" class="menu-item" @click="emit('view-members')">
+        <AppIcon name="users" :size="16" />View members
+      </button>
       <button v-if="canAdd" type="button" class="menu-item" @click="emit('add-members')">
-        ➕ Add members
+        <AppIcon name="plus" :size="16" />Add members
       </button>
       <button type="button" class="menu-item" @click="emit('channel-details')">
-        ⚙ Channel details
+        <AppIcon name="settings" :size="16" />Channel details
       </button>
-      <button type="button" class="menu-item" @click="emit('copy-id')">📋 Copy channel ID</button>
+      <button type="button" class="menu-item" @click="emit('copy-id')">
+        <AppIcon name="copy" :size="16" />Copy channel ID
+      </button>
       <div class="menu-divider" />
       <button type="button" class="menu-item danger" @click="emit('leave-channel')">
-        🚪 Leave channel
+        <AppIcon name="leave" :size="16" />Leave channel
       </button>
     </div>
   </div>
@@ -45,7 +52,7 @@ const canAdd = computed(() => canAddChannelMember(props.myRole, props.visibility
 .menu-overlay {
   position: fixed;
   inset: 0;
-  z-index: 90;
+  z-index: var(--z-dropdown);
 }
 
 .menu-card {
@@ -63,7 +70,9 @@ const canAdd = computed(() => canAddChannelMember(props.myRole, props.visibility
 }
 
 .menu-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   width: 100%;
   text-align: left;
   border: none;

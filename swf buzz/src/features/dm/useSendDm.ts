@@ -6,6 +6,7 @@ import { dmService } from "./DmService";
 import { reconcileOptimisticMessage } from "@/features/messages/optimisticMessage";
 import { logError, userMessageFor } from "@/services/errors";
 import type { Message } from "@/types/domain";
+import type { Attachment } from "@/protocol/imeta";
 
 /** Same optimistic send/retry pattern as features/messages/useSendMessage, but through DmService. */
 export function useSendDm(conversationId: MaybeRefOrGetter<string>) {
@@ -14,7 +15,11 @@ export function useSendDm(conversationId: MaybeRefOrGetter<string>) {
   const isSending = ref(false);
   const error = ref<string | null>(null);
 
-  async function send(content: string, mentionPubkeys: string[] = []): Promise<void> {
+  async function send(
+    content: string,
+    mentionPubkeys: string[] = [],
+    attachments: Attachment[] = [],
+  ): Promise<void> {
     const id = toValue(conversationId);
     const optimisticId = `optimistic-${crypto.randomUUID()}`;
     const optimistic: Message = {
@@ -26,6 +31,7 @@ export function useSendDm(conversationId: MaybeRefOrGetter<string>) {
       thread: {},
       mentions: mentionPubkeys,
       reactions: [],
+      attachments,
       status: "sending",
       isSystemMessage: false,
       isAgentMessage: false,
@@ -37,7 +43,7 @@ export function useSendDm(conversationId: MaybeRefOrGetter<string>) {
     isSending.value = true;
     error.value = null;
     try {
-      const sent = await dmService.sendMessage(id, content, mentionPubkeys);
+      const sent = await dmService.sendMessage(id, content, mentionPubkeys, attachments);
       queryClient.setQueryData<Message[]>(queryKey, (current) =>
         reconcileOptimisticMessage(current, optimisticId, sent),
       );

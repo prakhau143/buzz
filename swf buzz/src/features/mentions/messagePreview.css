@@ -1,0 +1,57 @@
+/*
+  MessagePreview tokens (MessagePreview.ts). The SAME mention language as
+  MentionChip / EveryoneMentionChip (the `--color-mention-*` tokens, weight 600,
+  subtle border, small radius) and the same link treatment as MessageLink
+  (accent, glyph, quiet underline) — only compact, and not interactive (the
+  row around a preview is the click target).
+
+  Each token is an unbreakable unit: `inline-block` + `nowrap`, so a chip never
+  splits across lines ("[@Prakhar" / "Mittal]"); a name or URL longer than the
+  preview ellipsizes inside its own chip (`max-width: 100%`) instead of
+  overflowing. `vertical-align: top` + a line height of one line box minus the
+  2px border keeps the chip exactly one text line tall, so a preview with
+  chips is as tall as one without, and it clamps with the parent's line clamp.
+*/
+.mp-chip,
+.mp-link {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: top;
+  line-height: 1.25;
+  line-height: calc(1lh - 2px);
+}
+.mp-chip {
+  padding: 0 4px;
+  border: 1px solid var(--color-mention-border);
+  border-radius: 5px;
+  background: var(--color-mention-bg);
+  color: var(--color-mention-text);
+  font-weight: 600;
+}
+.mp-link {
+  border: 1px solid transparent;
+  color: var(--color-primary);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+.mp-glyph {
+  display: inline-flex;
+  vertical-align: -2px;
+  opacity: 0.8;
+}
+.mp-glyph svg {
+  width: 12px;
+  height: 12px;
+}
+.mp-everyone .mp-glyph {
+  margin-left: 3px;
+}
+.mp-link .mp-glyph {
+  margin-right: 3px;
+}

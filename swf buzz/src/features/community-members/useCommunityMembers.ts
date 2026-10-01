@@ -17,7 +17,8 @@ export function useCommunityMembers() {
   const queryClient = useQueryClient();
 
   const query = useQuery({
-    queryKey: queryKeys.relayMembers(),
+    // Recomputed so the roster follows a community switch (the key names the community).
+    queryKey: computed(() => queryKeys.relayMembers()),
     queryFn: () => relayMembersService.fetchMembershipList(),
     staleTime: 30_000,
   });
@@ -51,7 +52,11 @@ export function useCommunityMembers() {
   });
 
   const changeRoleMutation = useMutation({
-    mutationFn: (params: { pubkey: string; targetRole: RelayMemberRole; newRole: RelayMemberRole }) =>
+    mutationFn: (params: {
+      pubkey: string;
+      targetRole: RelayMemberRole;
+      newRole: RelayMemberRole;
+    }) =>
       relayMembersService.changeRole({
         ...params,
         actingRole: myRole.value,

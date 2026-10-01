@@ -33,6 +33,13 @@ export class DevSigningService implements SigningService {
    * seed deterministic by something OTHER than "the shared dev default."
    */
   constructor(seed: "default" | "ephemeral" | Uint8Array = "default") {
+    // The guard docs/SECURITY.md promises. Without it the legacy Okta path
+    // (`forLocalIdentity`, reachable from silent resume and the invite page)
+    // would, in any Okta-configured production build, derive every user's
+    // Nostr secret from their non-secret Okta `sub`.
+    if (!import.meta.env.DEV) {
+      throw new Error("DevSigningService is development-only and unavailable in production builds");
+    }
     if (seed instanceof Uint8Array) {
       this.secretKey = seed;
     } else {

@@ -148,7 +148,7 @@ and vice versa.
   - Nested reply: add `["e", rootEventId, "", "root"]` + `["e", parentEventId, "", "reply"]`.
   - Typing indicators are therefore **thread-scoped**, not only channel-scoped.
 - Throttle to once per 3s per (channel, thread) scope on the client, matching the reference implementation.
-- Typing indicators double as the **fallback** "agent is working" signal when observer frames (kind 24200, §10) aren't available — see §10.
+- (OLD BUZZ also uses typing as a fallback "agent is working" signal — §10. SWF Buzz does not: it has no agent-activity UI, see the product boundary.)
 
 ## 7. Invites
 
@@ -177,7 +177,19 @@ pub const KIND_DM_HIDE: u32 = 41012;        // Hide DM from sidebar
 pub const KIND_DM_CREATED: u32 = 41001;     // UNVERIFIED — no confirmed live handler
 ```
 
-- **Open a DM**: publish `kind:41010`, content `""`, one `["p", <pubkey>]` tag per _other_ participant (1-8 others, 2-9 total). Relay replies via `OK` with `response:{channel_id}`.
+- **Open a DM**: publish `kind:41010`, content `""`, one `["p", <pubkey>]` tag per _other_ participant (1-8 others, 2-9 total), plus a `["d", <fresh uuid>]` tag.
+
+  The `d` tag is **required for correctness**, not optional metadata. A DM-open carries no unique content, so without it the event hashes over `{kind, pubkey, tags, content:""}` and a second-resolution `created_at` — two opens of the same conversation by the same person inside one second produce the **same event id**. `persist_command_event` dedups command events by id (`insert_event_in_transaction`, no `d` tag → plain insert) and answers the loser with the plain text `"duplicate: already processed"`, which carries no `channel_id` and leaves the caller with nothing to open. With a unique `d` the event takes the parameterized-replaceable path instead, is always a fresh row, and the relay always runs `open_dm` (itself find-or-create on the participant set) and always returns the channel id. OLD BUZZ's CLI does the same: `buzz-cli/src/commands/dms.rs:58` generates `Uuid::new_v4()` and pushes it as the `d` tag.
+  Verified live on 2026-09-23 (`tests/integration/dmLiveRelay.e2e.spec.ts`): repeated opens return `created:false` with the same `channel_id`, from either participant's side.
+
+  Relay replies via `OK` whose reason is the **literal string** `response:` followed by JSON — not bare JSON:
+
+  ```
+  ["OK","<event-id>",true,"response:{\"channel_id\":\"<uuid>\",\"created\":true}"]
+  ```
+
+  The `response:` prefix is part of the wire format for **every** command kind (41010, 30620, 46020, …), written at `command_executor.rs` `format!("response:{}", …)`. `JSON.parse` on the raw reason therefore always throws — strip the prefix first (`parseCommandResponse`, `src/protocol/commandResponse.ts`; OLD BUZZ equivalents: `buzz-cli/src/client.rs:1484`, `desktop/src-tauri/src/relay.rs:456` `parse_command_response`, `mobile/lib/shared/relay/nostr_models.dart:397`).
+  An **idempotent replay** (same event id) is answered with the plain text `"duplicate: already processed"` — no JSON, no `channel_id`.
   Source: `desktop/src-tauri/src/events.rs:737-751` (`build_dm_open`); relay: `buzz/crates/buzz-relay/src/handlers/command_executor.rs:297-390` (`handle_dm_open`); DB: `buzz/crates/buzz-db/src/store/dm.rs:358-390` (`open_dm`) — a DM is literally a `channels` table row with `channel_type = "dm"`.
 - **After opening, all message/reaction/edit/delete traffic is the exact same kind set as a normal channel** (`kind:9`, `kind:7`, edits, deletions), tagged `["h", <dm-channel-uuid>]`. There is no DM-specific message kind.
   Source: `desktop/src/features/channels/isDmNotifiableKind.ts:1-19` (comment: "matches every h-tagged event in the channel").
@@ -248,7 +260,7 @@ pub struct ThreadMarkers { pub root: Option<String>, pub reply: Option<String> }
   - `#p`-gated (`P_GATED_KINDS`) — only the addressed reader can even receive the ciphertext via subscription; decrypting further requires the recipient's private key (see `DECISIONS.md` §NIP-46 + observer frames — this has a real implication for a NIP-46-signing client).
   - **UI rule, confirmed from source**: this is the _primary_ "agent is working" signal, with `kind:20002` typing indicators as a documented **fallback** when the observer stream is absent.
     Source: `desktop/src/features/agents/agentWorkingSignal.ts:11-28`.
-  - **Do not render observer frames as chat messages.** Drive a status/typing-style UI element ("SWF Agent is working…") instead, per product requirement §19.
+  - **Do not render observer frames as chat messages.** OLD BUZZ drives a status element from them; **SWF Buzz does not consume observer frames at all** (no managed agents — product boundary, 2026-09-28). This section documents the wire format only.
 - Adjacent agent-job kinds registered (not required for the in-scope feature list, note only): `43001-43006` job request/accepted/progress/result/cancel/error; `44200` `KIND_AGENT_TURN_METRIC` (durable, NIP-44-to-owner, token usage); `30174` `KIND_AGENT_ENGRAM` (agent memory).
 
 ## 11. Deployment-wide admin console (`/api/admin/v1/*`) — a separate role plane and a separate host
@@ -292,6 +304,22 @@ below).
 
 ---
 
+## 12. Settings & feedback kinds (added with the Settings / Send Feedback work)
+
+| Kind | Purpose | Verified against (../buzz) |
+|---|---|---|
+| 9033 | Community icon. Tags `["icon", <data:image/* ≤ 98,304 bytes | http(s) URL ≤ 2,048 chars>]`, empty value clears. Closed relay: owner/admin only; open relay with no owner/admin: any authenticated member. `created_at` within ±120 s. Served back as NIP-11 `icon`. | `crates/buzz-relay/src/handlers/relay_admin.rs:59-95, 115-124, 195-301`; `desktop/src/shared/api/communityProfile.ts:473-484` |
+| 42000 | Product feedback. `content` = body (non-empty, ≤ 32 KiB); optional `["category", "bug"|"praise"|"needs-work"]`; `imeta` tags for attachments uploaded to the same community. Requires NIP-42 auth + `MessagesWrite`. Sidecarred into `product_feedback` (deployment-wide), never stored as an event or fanned out. Read only via `/api/admin/v1/feedback*`. | `crates/buzz-core/src/kind.rs:329-331`; `crates/buzz-relay/src/handlers/ingest.rs:2290-2307`; `handlers/product_feedback.rs:11-97`; `migrations/0017_product_feedback.sql` |
+| 30030 | NIP-30 emoji set, one per author, `d = "buzz:custom-emoji"`, tags `["emoji", <shortcode [a-z0-9_-]{1,64}>, <url>]`. The community palette is the client-side union of every member's set. | `desktop/src/shared/api/customEmoji.ts:1-225`; `crates/buzz-relay/src/handlers/ingest.rs:145-158, 3023-3025` |
+| 28936 | Leave community (`["-"]`). Already used by `features/communities/leaveCommunity.ts`. | `crates/buzz-relay/src/handlers/ingest.rs:2584-2658` |
+
+## 13. Pinned messages and `@everyone` (Phase G — docs/PHASE_G_PINNED_MESSAGES_EVERYONE.md)
+
+| Item | Shape | Verified against (../buzz) |
+|---|---|---|
+| 40004 `KIND_STREAM_MESSAGE_PINNED` | Pin / unpin of one message in a conversation. Tags `["h", <channel or DM channel id>]`, `["e", <message id>]`, `["action", "pin"\|"unpin"]`, pin only: `["author", <hex>]` (claim, verified on read). No `p` tag (it would become a mention). Content `""`. | Kind exists in `crates/buzz-core/src/kind.rs:484-485`. Accepted with `Scope::MessagesWrite` (`ingest.rs:477`) and h-scoped (`ingest.rs:713`) through the generic membership gate. **No role validation, no side effects, not replaceable**: every event is stored, and the one active pin with its role rules is resolved by each reader (`features/pins/pinModel.ts`). The old desktop client has no pin feature to mirror. |
+| `["mention", "everyone"]` | Semantic `@everyone` on a kind:9 channel message (and on a kind:40003 edit that keeps it). Text `@everyone` + this tag = the mention; text alone is not. | No audience mention exists anywhere in the relay or old client; no `"mention"` tag is interpreted by the relay (searched `crates/`). Multi-letter, so not indexed: recipients are resolved by each reader from its access-checked subscriptions. |
+
 ## Kind quick-reference table (everything above, one place)
 
 | Kind  | Name                                     | Scope                         | Client-submittable?                                    |
@@ -322,6 +350,7 @@ below).
 | 39002 | Group members list                       | addressable                   | **relay-only**                                         |
 | 39005 | Thread summary overlay                   | addressable                   | **relay-only**                                         |
 | 39006 | Window bounds (pagination overlay)       | addressable                   | **relay-only**                                         |
+| 40004 | Message pinned / unpinned (§13)          | `#h`                          | yes (members; role rules enforced by every reader)     |
 | 40099 | System message                           | `#h`                          | **relay-only**                                         |
 | 41010 | DM open                                  | none (creates)                | yes                                                    |
 | 41012 | DM hide                                  | `#h` (dm channel)             | yes                                                    |

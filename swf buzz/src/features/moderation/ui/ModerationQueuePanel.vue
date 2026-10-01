@@ -3,9 +3,11 @@
  * Community moderation queue — reports + audit log. Visible only to the
  * community owner/admin. See docs/PROTOCOL_IMPLEMENTATION_REFERENCE.md §2b.
  */
-import { ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import StateView from "@/components/StateView.vue";
 import BaseButton from "@/components/BaseButton.vue";
+import ModerationActorName from "./ModerationActorName.vue";
+import { relativeTime } from "@/features/identity/format";
 import { useCommunityMembers } from "@/features/community-members/useCommunityMembers";
 import { useModerationAudit, useModerationReports } from "../useModerationQueue";
 import { useModerationActions } from "../useModerationActions";
@@ -31,6 +33,34 @@ const resolvingId = ref<string | null>(null);
 const resolveErrors = ref<Record<string, string>>({});
 
 const ONE_DAY_SECS = 24 * 60 * 60;
+
+/**
+ * Audit filtering.
+ *
+ * The action list is derived from the rows actually present rather than a
+ * hard-coded enum: the relay may record action kinds this client does not know
+ * about, and a fixed list would silently hide them from an audit log — the one
+ * surface where hiding anything is unacceptable.
+ */
+const auditFilter = ref<string>("all");
+const auditActionKinds = computed(() =>
+  [...new Set((auditActions.value ?? []).map((a) => a.action))].sort(),
+);
+const visibleAudit = computed(() =>
+  (auditActions.value ?? []).filter(
+    (a) => auditFilter.value === "all" || a.action === auditFilter.value,
+  ),
+);
+
+/** Shared clock so relative times tick without a timer per row. */
+const now = ref(Date.now());
+let clock: ReturnType<typeof setInterval> | null = null;
+onMounted(() => {
+  clock = setInterval(() => (now.value = Date.now()), 30_000);
+});
+onBeforeUnmount(() => {
+  if (clock) clearInterval(clock);
+});
 
 async function handleResolve(report: ModerationReportSummary, action: ResolutionAction) {
   resolvingId.value = report.id;
@@ -168,10 +198,37 @@ async function handleResolve(report: ModerationReportSummary, action: Resolution
         <StateView v-if="auditLoading" kind="loading" />
         <StateView v-else-if="auditError" kind="error" title="Couldn't load the audit log" />
         <StateView v-else-if="!auditActions?.length" kind="empty" title="No moderation actions yet" />
+        <div class="audit-toolbar">
+          <select v-model="auditFilter" class="audit-filter" aria-label="Filter audit log by action">
+            <option value="all">All actions</option>
+            <option v-for="action in auditActionKinds" :key="action" :value="action">
+              {{ action }}
+            </option>
+          </select>
+          <span class="audit-count">{{ visibleAudit.length }} of {{ auditActions?.length ?? 0 }}</span>
+        </div>
+        <StateView
+          v-if="visibleAudit.length === 0"
+          kind="empty"
+          title="No actions match that filter"
+        />
         <ul v-else class="audit-list">
-          <li v-for="entry in auditActions" :key="entry.id" class="audit-row">
-            <span class="audit-action">{{ entry.action }}</span>
-            <span class="audit-time">{{ new Date(entry.createdAt).toLocaleString() }}</span>
+          <li v-for="entry in visibleAudit" :key="entry.id" class="audit-row">
+            <div class="audit-line">
+              <ModerationActorName :pubkey="entry.actorPubkey" />
+              <span class="audit-action">{{ entry.action }}</span>
+              <ModerationActorName v-if="entry.targetPubkey" :pubkey="entry.targetPubkey" />
+              <span v-else-if="entry.targetEventId" class="audit-target-event">a message</span>
+            </div>
+            <div class="audit-meta">
+              <!-- Relative for scanning, absolute on hover for the record: an
+                   audit log is evidence, so the exact timestamp must stay reachable. -->
+              <span class="audit-time" :title="new Date(entry.createdAt).toLocaleString()">
+                {{ relativeTime(Math.floor(new Date(entry.createdAt).getTime() / 1000), now) }}
+              </span>
+              <span v-if="entry.publicReason" class="audit-reason">{{ entry.publicReason }}</span>
+              <span v-else-if="entry.reasonCode" class="audit-reason">{{ entry.reasonCode }}</span>
+            </div>
           </li>
         </ul>
       </template>
@@ -277,15 +334,56 @@ async function handleResolve(report: ModerationReportSummary, action: Resolution
 
 .audit-row {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 2px;
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
-  padding: var(--space-1) 0;
+  padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--color-border);
+}
+.audit-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
 }
 .audit-action {
   text-transform: capitalize;
   font-weight: 600;
   color: var(--color-text);
+}
+.audit-target-event {
+  color: var(--color-text-muted);
+}
+.audit-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-subtle);
+}
+.audit-reason {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+.audit-filter {
+  height: 28px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--font-size-xs);
+}
+.audit-count {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-subtle);
 }
 </style>

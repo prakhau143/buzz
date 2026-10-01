@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CloseButton from "@/components/CloseButton.vue";
 /**
  * The new-backend (DECISIONS.md D10) channels/messages/threads UI — a
  * deliberately separate, self-contained view from `ChannelsView.vue`
@@ -94,14 +95,17 @@ async function handleSend() {
   }
 }
 
+// Pane visibility is derived from the context panel (stores/ui.ts), so this
+// drives the panel rather than a separate open/closed flag. The local
+// `openThreadRootId` stays because this view's thread data is HTTP-backed.
 const openThreadRootId = ref<string | null>(null);
 function openThread(messageId: string) {
   openThreadRootId.value = messageId;
-  ui.detailsPaneOpen = true;
+  ui.openThread(messageId);
 }
 function closeThread() {
   openThreadRootId.value = null;
-  ui.detailsPaneOpen = false;
+  ui.closeContextPanel();
 }
 const { data: thread, reply: sendReply, isReplying } = useThreadHttp(() => openThreadRootId.value);
 const threadReplyText = ref("");
@@ -229,7 +233,7 @@ const myDisplayName = computed(
       <div v-if="openThreadRootId" class="thread-panel">
         <div class="thread-panel-header">
           <h3>Thread</h3>
-          <button type="button" @click="closeThread">✕</button>
+          <CloseButton label="Close thread" @click="closeThread" />
         </div>
         <div v-if="thread" class="thread-root">{{ thread.root.content }}</div>
         <ul class="thread-replies">

@@ -60,6 +60,53 @@ export function canManageChannelMember(myRole: MemberRole | null): boolean {
 }
 
 /**
+ * Whether I may edit a given message.
+ *
+ * Only the author may edit, and OLD BUZZ additionally re-gates on current
+ * access: a person removed from a private channel cannot go back and rewrite
+ * their old messages (`ingest.rs` `validate_edit_ownership`). Both conditions
+ * are mirrored here so the menu item does not appear when the publish would be
+ * refused — the relay remains the actual enforcement point.
+ */
+export function canEditMessage(params: {
+  myPubkey: string | null;
+  authorPubkey: string;
+  myRole: MemberRole | null;
+  visibility: ChannelVisibility;
+}): boolean {
+  if (!params.myPubkey || params.myPubkey !== params.authorPubkey) return false;
+  return params.myRole !== null || params.visibility === "open";
+}
+
+/**
+ * Whether I may delete a given message, and by which path.
+ *
+ * `"self"` → kind:5, the author's own retraction. `"admin"` → kind:9005, which
+ * is the ONLY path that lets a channel owner/admin remove somebody else's
+ * message; sending kind:5 for that case is refused by the relay because kind:5
+ * is gated on authorship alone. `null` → no delete offered.
+ *
+ * An author who has lost access to a private channel falls through to the
+ * admin path if they hold a channel role, and otherwise gets nothing — matching
+ * `side_effects.rs:614-654`.
+ */
+export function messageDeleteMode(params: {
+  myPubkey: string | null;
+  authorPubkey: string;
+  myRole: MemberRole | null;
+  visibility: ChannelVisibility;
+}): "self" | "admin" | null {
+  // No identity, no delete path — including the admin one. Without a signed-in
+  // key there is nothing to sign the deletion with, so offering the action
+  // would produce a publish that can only fail.
+  if (!params.myPubkey) return null;
+  const isAuthor = params.myPubkey === params.authorPubkey;
+  if (isAuthor && (params.myRole !== null || params.visibility === "open")) return "self";
+  if (isElevated(params.myRole)) return "admin";
+  return null;
+}
+
+/**
  * Whether removing/demoting `target` would orphan the channel (the
  * `LastOwnerRemoval`/`LastOwnerDemotion` guard, channel_authz.rs:34-45,
  * mirroring `is_sole_owner`). `members` must be the channel's current

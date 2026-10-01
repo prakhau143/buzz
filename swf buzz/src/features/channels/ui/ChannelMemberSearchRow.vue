@@ -16,7 +16,7 @@ const matches = computed(
 
 <template>
   <li v-if="matches" class="member-row" @click="emit('select')">
-    <AvatarCircle :name="displayName" :avatar-url="profile?.avatarUrl" :size="28" />
+    <AvatarCircle :name="displayName" :avatar-url="profile?.avatarUrl" :pubkey="member.pubkey" :size="28" />
     <span class="name">{{ displayName }}</span>
     <span class="role" :class="member.role">{{ member.role }}</span>
   </li>

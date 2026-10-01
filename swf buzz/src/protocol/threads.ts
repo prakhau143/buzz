@@ -30,7 +30,9 @@ export function parseThreadSummaryEvent(event: RawNostrEvent): ThreadSummary | n
     const content = JSON.parse(event.content) as ThreadSummaryContent;
     return {
       rootId,
-      replyCount: content.reply_count ?? 0,
+      // OLD BUZZ shows `descendant_count` (every reply in the thread, nested ones
+      // included — desktop `threadPanel.ts:400`); `reply_count` is direct replies only.
+      replyCount: content.descendant_count ?? content.reply_count ?? 0,
       lastReplyAt: content.last_reply_at,
       participants: content.participants ?? [],
     };

@@ -16,10 +16,24 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { finalizeEvent, generateSecretKey } from "nostr-tools/pure";
+import { useWebSocketImplementation } from "nostr-tools/relay";
+import WebSocket from "ws";
 import { RelayConnectionService } from "@/services/RelayConnectionService";
 import { useConnectionStore } from "@/stores/connection";
 import { MinimalNostrRelay } from "./helpers/minimalNostrRelay";
 import type { SignedEvent } from "@/features/signing/types";
+
+// This file runs in the `node` environment, where the client-side WebSocket
+// nostr-tools reaches for is whatever Node happens to provide as a global:
+// nothing at all before Node 22, and Node's bundled undici implementation from
+// Node 22 on. The latter recurses without bound when nostr-tools calls
+// `ws.close()` from inside its own `onerror` handler (relay.js:371) — the
+// socket re-fires `error` on every close attempt, crashing the run with
+// "Maximum call stack size exceeded" during the post-test reconnect storm.
+// The app itself never uses that implementation (browser/Tauri WebView supplies
+// a real one), so pin the test to the `ws` client and stay Node-version
+// independent. Must run before any Relay is constructed.
+useWebSocketImplementation(WebSocket);
 
 let relay: MinimalNostrRelay;
 let service: RelayConnectionService;
@@ -140,6 +154,43 @@ describe("RelayConnectionService — wire-level plumbing", () => {
 
     expect(eventCount).toBe(1);
   }, 10000);
+
+  /**
+   * Phase 4A §12 — subscription-leak check. A channel timeline closes and
+   * re-opens its live subscription on every reconnect (to re-anchor `since`),
+   * so a closed handle must be deregistered, not merely detached. If it were
+   * only detached, each reconnect would re-issue every subscription ever made
+   * and one published event would be delivered N times.
+   */
+  it("does NOT re-issue a closed subscription after reconnecting, and re-subscribing delivers once", async () => {
+    await service.connect(relay.url);
+
+    let closedCount = 0;
+    const closed = service.subscribe("closed", [{ kinds: [1] }], { onEvent: () => closedCount++ });
+    closed.close();
+
+    let liveCount = 0;
+    service.subscribe("live", [{ kinds: [1] }], { onEvent: () => liveCount++ });
+
+    // Two reconnects in quick succession — repeated reconnect must stay safe.
+    for (let i = 0; i < 2; i++) {
+      relay.dropAllConnections();
+      await new Promise<void>((resolve) => {
+        const interval = setInterval(() => {
+          if (useConnectionStore().status === "connected") {
+            clearInterval(interval);
+            resolve();
+          }
+        }, 50);
+      });
+    }
+
+    await service.publish(signTestEvent(1, "after two reconnects"));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(closedCount, "a closed subscription must never be re-issued").toBe(0);
+    expect(liveCount, "the live subscription must deliver exactly once, not once per reconnect").toBe(1);
+  }, 15000);
 });
 
 describe("SigningService + RelayConnectionService — publish round trip", () => {

@@ -1,4 +1,4 @@
-import { type MaybeRefOrGetter, toValue } from "vue";
+import { computed, type MaybeRefOrGetter, toValue } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { queryKeys } from "@/app/providers/queryKeys";
 import { logError } from "@/services/errors";
@@ -11,14 +11,20 @@ export function useModerationReports(status: "open" | "all" = "open") {
   const queryClient = useQueryClient();
 
   const query = useQuery({
-    queryKey: queryKeys.moderationReports(status),
-    queryFn: () => moderationService.listReports(status === "open" ? { status: "open" } : undefined),
+    // Keys are recomputed so each follows a community switch (they name the community).
+    queryKey: computed(() => queryKeys.moderationReports(status)),
+    queryFn: () =>
+      moderationService.listReports(status === "open" ? { status: "open" } : undefined),
     staleTime: 15_000,
   });
 
   const resolveMutation = useMutation({
-    mutationFn: (params: { reportEventId: string; action: ResolutionAction; actingRole: RelayMemberRole | null; reason?: string }) =>
-      moderationService.resolveReport(params),
+    mutationFn: (params: {
+      reportEventId: string;
+      action: ResolutionAction;
+      actingRole: RelayMemberRole | null;
+      reason?: string;
+    }) => moderationService.resolveReport(params),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.moderationReports("open") });
       void queryClient.invalidateQueries({ queryKey: queryKeys.moderationReports("all") });
@@ -38,7 +44,7 @@ export function useModerationReports(status: "open" | "all" = "open") {
 /** The community audit log — `GET /moderation/audit`, mod-authz gated relay-side. */
 export function useModerationAudit() {
   return useQuery({
-    queryKey: queryKeys.moderationAudit(),
+    queryKey: computed(() => queryKeys.moderationAudit()),
     queryFn: () => moderationService.listAuditActions(100),
     staleTime: 15_000,
   });
@@ -47,7 +53,7 @@ export function useModerationAudit() {
 /** Active bans/timeouts — `GET /moderation/restricted`, mod-authz gated relay-side. */
 export function useModerationRestrictions(enabled: MaybeRefOrGetter<boolean> = true) {
   return useQuery({
-    queryKey: queryKeys.moderationRestrictions(),
+    queryKey: computed(() => queryKeys.moderationRestrictions()),
     queryFn: () => moderationService.listRestrictions(),
     enabled: () => toValue(enabled),
     staleTime: 15_000,

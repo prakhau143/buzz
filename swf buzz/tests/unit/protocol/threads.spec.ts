@@ -37,6 +37,11 @@ describe("parseThreadSummaryEvent", () => {
     });
   });
 
+  it("counts the whole thread (descendant_count) like OLD BUZZ, not just direct replies", () => {
+    const event = summaryEvent({ content: JSON.stringify({ reply_count: 2, descendant_count: 5, last_reply_at: 9, participants: [] }) });
+    expect(parseThreadSummaryEvent(event)?.replyCount).toBe(5);
+  });
+
   it("falls back to the #e tag for rootId when #d is absent", () => {
     const event = summaryEvent({ tags: [["e", ROOT]] });
     expect(parseThreadSummaryEvent(event)?.rootId).toBe(ROOT);

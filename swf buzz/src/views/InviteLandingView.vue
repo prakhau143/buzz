@@ -116,7 +116,7 @@ function inviteErrorMessage(err: unknown): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--color-background);
+  background: var(--color-bg);
   padding: var(--space-4);
 }
 .card {

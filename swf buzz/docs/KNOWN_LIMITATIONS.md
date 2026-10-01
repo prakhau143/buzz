@@ -69,19 +69,14 @@ as expected behavior worth knowing about).
   documented anywhere source-verified in this project's protocol research — implementing against
   it would be guessing, which the project's own rules explicitly prohibit. Needs the payload shape
   confirmed from `buzz-relay` source before it can be built.
-- **Agent "finished" detection is an unverified heuristic**
-  (`src/features/agents/useAgentObserverFeed.ts`). The regex matching `type` values like
-  `"complete"`/`"error"`/`"result"` is a guess — the protocol reference only confirms one real
-  example (`"turn_started"`). Could misclassify real observer-frame types until verified against a
-  live `buzz-acp` instance.
 - **Join-then-refetch race** (`src/features/channels/useJoinChannel.ts`). Invalidating the members
   query immediately after a 9021 `OK` may run ahead of the relay's async 39001/39002 re-emission,
   occasionally showing "not a member yet" right after a successful join until the next natural
   refetch.
-- **Mention candidate list can be stale** (`src/features/agents/useMentionCandidates.ts`, already
-  self-documented in its own code comment) — reads the profile cache via a non-reactive snapshot,
-  so a profile that finishes loading after the mention dropdown first renders won't update the
-  displayed name until something else triggers a recompute.
+- **Mentions: remaining gaps vs OLD BUZZ** — see `docs/MENTION_IMPLEMENTATION_REPORT.md` §
+  "Remaining limitations" (edits carry no mention snapshot; no non-member invite prompt; a
+  renamed person's old `@Name` in history renders as plain text). The old stale-candidate issue
+  is gone: candidates now come from the reactive profile registry (`features/mentions/`).
 - **No unhide UI for DMs** — `Kind41010Transport`/`DmService` support unhiding by re-publishing
   `kind:41010` with the same participants, but `DmView.vue` only exposes "Hide," not "Unhide."
 

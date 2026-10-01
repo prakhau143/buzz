@@ -13,6 +13,18 @@ export function buildManagedAgentFilter(pubkey: string): NostrFilter {
   return { kinds: [KIND_MANAGED_AGENT], "#d": [pubkey], limit: 1 };
 }
 
+/**
+ * "Which of these pubkeys are managed agents?" in one filter.
+ *
+ * NOTE the limit: the single-pubkey filter above uses `limit: 1`, which is
+ * correct for one subject and silently wrong for many — it would cap the whole
+ * batch at a single event and mislabel every other agent as human. The bound
+ * here is one event per subject, since kind:30177 is addressable by `d`.
+ */
+export function buildManagedAgentsFilter(pubkeys: string[]): NostrFilter {
+  return { kinds: [KIND_MANAGED_AGENT], "#d": pubkeys, limit: pubkeys.length };
+}
+
 export function buildPersonaFilter(slug: string): NostrFilter {
   return { kinds: [KIND_PERSONA], "#d": [slug], limit: 1 };
 }

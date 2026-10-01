@@ -51,6 +51,27 @@ describe("buildMessageEvent", () => {
       ["p", mention],
     ]);
   });
+
+  it("emits one lowercase p tag per identity — a mentioned parent author is not tagged twice", () => {
+    // OLD BUZZ events.rs `mention_tags`: lowercase hex, deduplicated.
+    const mention = "m".repeat(64);
+    const event = buildMessageEvent({
+      channelId: CHANNEL_ID,
+      content: "reply",
+      reply: { rootEventId: ROOT, parentEventId: ROOT, parentAuthorPubkey: PARENT_AUTHOR },
+      mentionPubkeys: [PARENT_AUTHOR, mention.toUpperCase(), mention],
+    });
+    expect(event.tags.filter((t) => t[0] === "p")).toEqual([
+      ["p", PARENT_AUTHOR],
+      ["p", mention],
+    ]);
+  });
+
+  it("caps mention p tags at 50 (OLD BUZZ MAX_MENTIONS)", () => {
+    const many = Array.from({ length: 60 }, (_, i) => i.toString(16).padStart(64, "0"));
+    const event = buildMessageEvent({ channelId: CHANNEL_ID, content: "all", mentionPubkeys: many });
+    expect(event.tags.filter((t) => t[0] === "p")).toHaveLength(50);
+  });
 });
 
 describe("parseMessageEvent", () => {

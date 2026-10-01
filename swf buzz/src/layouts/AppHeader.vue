@@ -1,87 +1,66 @@
 <script setup lang="ts">
 /**
- * The one persistent header + primary nav, rendered in `App.vue` OUTSIDE
- * `ErrorBoundary` — so it stays usable (Home is always reachable) even
- * when the routed view underneath it crashes. Previously this markup
- * lived inside `AppShell.vue`, which is rendered *inside* each routed
- * view — meaning a view crash took the header down with it. See the P0/P2
- * fix this component is part of.
+ * The persistent header, rendered in `App.vue` OUTSIDE `ErrorBoundary` so
+ * it stays usable when a routed view crashes. Hidden on full-screen routes
+ * (Settings), which is why presence lives in `app/SessionServices.vue`, not here.
  *
- * `usePresenceHeartbeat`/`useAgentObserverFeed` moved here from
- * `AppShell.vue` for the same reason: this is the one place guaranteed to
- * render on every authenticated screen (including the new `HomeView`,
- * which doesn't use `AppShell`'s sidebar/main/details layout at all).
+ * A navigation shell only: [sidebar] [back] [forward] | [SWF Buzz].
+ * Account and connection state deliberately live elsewhere — sign-out in the
+ * bottom-left profile menu, connection status in the community switcher (it is
+ * a property of ONE community, not of the app) — so the top bar never carries
+ * a duplicate, global "Connected" pill, avatar or Sign out.
  */
-import { computed } from "vue";
-import { useRoute } from "vue-router";
-import { useUiStore } from "@/stores/ui";
-import { useSessionStore } from "@/stores/session";
-import { useAuth } from "@/features/auth/useAuth";
-import ConnectionBadge from "@/components/ConnectionBadge.vue";
-import AvatarCircle from "@/components/AvatarCircle.vue";
+import AppIcon from "@/components/AppIcon.vue";
 import BrandLogo from "@/components/BrandLogo.vue";
-import { usePresenceHeartbeat } from "@/features/presence/usePresenceHeartbeat";
-import { useAgentObserverFeed } from "@/features/agents/useAgentObserverFeed";
+import { useUiStore } from "@/stores/ui";
+import { useAppNavigation } from "@/features/navigation/useAppNavigation";
+import { shortcutHint } from "@/features/shortcuts/shortcutRegistry";
 
 const uiStore = useUiStore();
-const sessionStore = useSessionStore();
-const route = useRoute();
-const { logout } = useAuth();
-
-usePresenceHeartbeat();
-useAgentObserverFeed();
-
-const navLinks = [
-  { to: "/", label: "Home", matchNames: ["home"] },
-  { to: "/community", label: "Channels", matchNames: ["community-channels"] },
-  { to: "/community-dm", label: "Direct Messages", matchNames: ["community-dm"] },
-] as const;
-
-function isActive(matchNames: readonly string[]): boolean {
-  return matchNames.includes(String(route.name ?? ""));
-}
-
-const avatarName = computed(
-  () =>
-    sessionStore.applicationUser?.displayName ??
-    sessionStore.applicationUser?.email ??
-    sessionStore.employeeEmail ??
-    "You",
-);
+const { canGoBack, canGoForward, back, forward } = useAppNavigation();
+const backHint = shortcutHint("go-back");
+const forwardHint = shortcutHint("go-forward");
 </script>
 
 <template>
   <header class="app-header">
-    <div class="header-left">
+    <div class="header-nav">
       <button
-        class="icon-button"
         type="button"
-        title="Toggle sidebar"
-        aria-label="Toggle sidebar"
+        class="icon-button"
+        :aria-label="uiStore.sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'"
+        :title="uiStore.sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'"
+        :aria-pressed="!uiStore.sidebarCollapsed"
+        data-testid="header-sidebar-toggle"
         @click="uiStore.toggleSidebar()"
       >
-        ☰
+        <AppIcon name="menu" :size="20" />
       </button>
-      <BrandLogo />
-      <nav class="primary-nav" aria-label="Primary">
-        <RouterLink
-          v-for="link in navLinks"
-          :key="link.to"
-          :to="link.to"
-          class="nav-link"
-          :class="{ active: isActive(link.matchNames) }"
-        >
-          {{ link.label }}
-        </RouterLink>
-      </nav>
-    </div>
-    <div class="header-right">
-      <ConnectionBadge />
-      <AvatarCircle :name="avatarName" :size="28" />
-      <button class="icon-button sign-out" type="button" title="Sign out" @click="logout">
-        Sign out
+      <button
+        type="button"
+        class="icon-button"
+        aria-label="Back"
+        :title="`Back (${backHint})`"
+        :disabled="!canGoBack"
+        data-testid="header-back"
+        @click="back"
+      >
+        <AppIcon name="chevron-left" :size="20" />
+      </button>
+      <button
+        type="button"
+        class="icon-button"
+        aria-label="Forward"
+        :title="`Forward (${forwardHint})`"
+        :disabled="!canGoForward"
+        data-testid="header-forward"
+        @click="forward"
+      >
+        <AppIcon name="chevron-right" :size="20" />
       </button>
     </div>
+    <span class="divider" aria-hidden="true" />
+    <BrandLogo />
   </header>
 </template>
 
@@ -89,76 +68,59 @@ const avatarName = computed(
 .app-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  height: 52px;
-  padding: 0 var(--space-4);
+  gap: var(--space-2);
+  height: 48px;
+  padding: 0 var(--space-3);
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
+  min-width: 0;
 }
-
-.header-left,
-.header-right {
+.header-nav {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: 2px;
+  flex-shrink: 0;
 }
-
-.primary-nav {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  margin-left: var(--space-2);
-}
-
-.nav-link {
-  padding: var(--space-1) var(--space-3);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  color: var(--color-text-muted);
-  text-decoration: none;
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-.nav-link:hover {
-  background: var(--color-surface-muted);
-  color: var(--color-text);
-}
-.nav-link.active {
-  background: var(--color-surface-muted);
-  color: var(--color-text);
-  font-weight: 600;
-}
-
 .icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
   height: 32px;
-  padding: 0 var(--space-2);
-  border-radius: var(--radius-md);
+  padding: 0;
   border: none;
+  border-radius: var(--radius-md);
   background: transparent;
-  cursor: pointer;
   color: var(--color-text-muted);
-  font-size: var(--font-size-md);
-  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
 }
-.icon-button:hover {
+.icon-button:hover:not(:disabled) {
   background: var(--color-surface-muted);
   color: var(--color-text);
 }
-.sign-out {
-  font-size: var(--font-size-sm);
+.icon-button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
 }
-
-@media (max-width: 720px) {
-  .app-header {
-    flex-wrap: wrap;
-    height: auto;
-    padding: var(--space-2) var(--space-3);
-    gap: var(--space-2);
-  }
-  .primary-nav {
-    margin-left: 0;
-    flex-wrap: wrap;
+.icon-button:disabled {
+  color: var(--color-text-subtle);
+  opacity: 0.45;
+  cursor: default;
+}
+.divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 var(--space-1);
+  background: var(--color-border);
+  flex-shrink: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .icon-button {
+    transition: none;
   }
 }
 </style>

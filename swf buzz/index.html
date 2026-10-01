@@ -3,7 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover: draw under notches and read env(safe-area-inset-*) (mobile layout pads them).
+         interactive-widget=resizes-content: Android resizes the layout when the keyboard opens. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>SWF Buzz</title>
   </head>
 

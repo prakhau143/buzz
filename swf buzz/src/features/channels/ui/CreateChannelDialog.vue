@@ -9,9 +9,14 @@
 import { ref } from "vue";
 import BaseButton from "@/components/BaseButton.vue";
 import { useCreateChannel } from "../useCreateChannel";
+import { useEscapeKey } from "@/composables/useEscapeKey";
+import { useFocusTrap } from "@/composables/useFocusTrap";
 import type { ChannelVisibility } from "@/types/domain";
 
 const emit = defineEmits<{ close: [] }>();
+useEscapeKey(() => emit("close"));
+const dialog = ref<HTMLElement | null>(null);
+useFocusTrap(dialog);
 
 const name = ref("");
 const visibility = ref<ChannelVisibility>("open");
@@ -33,7 +38,7 @@ async function handleSubmit() {
 
 <template>
   <div class="dialog-overlay" @click.self="emit('close')">
-    <div class="dialog-card" role="dialog" aria-modal="true" aria-label="Create channel">
+    <div ref="dialog" class="dialog-card" role="dialog" aria-modal="true" aria-label="Create channel">
       <h2>Create a channel</h2>
 
       <label class="field-label" for="channel-name">Name</label>
@@ -90,7 +95,7 @@ async function handleSubmit() {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: var(--z-modal);
 }
 
 .dialog-card {

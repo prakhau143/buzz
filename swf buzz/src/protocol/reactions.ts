@@ -1,9 +1,16 @@
 /**
  * Reactions — KIND_REACTION (7), NIP-25. docs/PROTOCOL_IMPLEMENTATION_REFERENCE.md §4.
- * Subscription quirk: reactions are only delivered filtered by #h, never a bare {kinds:[7]}.
+ *
+ * Channel scoping is VIRTUAL for this kind: the client publishes only an `e`
+ * tag, the relay derives and stores the channel from the target, and a `#h`
+ * filter is matched server-side against that stored channel — the kind:7 event
+ * itself never carries an `h` tag. The client must therefore not re-apply `#h`
+ * against literal tags (nostr-tools does by default; see
+ * `matchesAllowingVirtualChannelTag` in services/RelayConnectionService.ts —
+ * without it every delivered reaction was dropped, docs/PHASE_3_IMPLEMENTATION_AUDIT.md §19).
  */
 import type { UnsignedEvent } from "@/features/signing/types";
-import { KIND_REACTION } from "./kinds";
+import { KIND_DELETION, KIND_REACTION } from "./kinds";
 import { firstTagValue, type NostrFilter, type RawNostrEvent } from "./types";
 
 const MAX_PLAIN_EMOJI_LENGTH = 64;
@@ -29,6 +36,15 @@ export function buildReactionEvent(params: BuildReactionParams): UnsignedEvent {
   return { kind: KIND_REACTION, content: params.emoji, tags };
 }
 
+/**
+ * Builds an unsigned kind:5 (NIP-09) deletion targeting one of MY OWN
+ * reaction (kind:7) events, identified by its own event id — not the
+ * message it reacted to. The relay enforces self-authorship server-side.
+ */
+export function buildRemoveReactionEvent(reactionEventId: string): UnsignedEvent {
+  return { kind: KIND_DELETION, content: "", tags: [["e", reactionEventId]] };
+}
+
 export interface ParsedReactionEvent {
   id: string;
   targetEventId: string;
@@ -51,7 +67,7 @@ export function parseReactionEvent(event: RawNostrEvent): ParsedReactionEvent | 
   };
 }
 
-/** Reaction subscriptions must be scoped by channel — a bare {kinds:[7]} filter delivers nothing. */
+/** Reaction subscriptions are scoped by channel — served from the relay's derived channel (see file header). */
 export function buildReactionFilter(channelId: string): NostrFilter {
   return { kinds: [KIND_REACTION], "#h": [channelId] };
 }

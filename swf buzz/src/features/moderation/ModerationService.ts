@@ -10,7 +10,8 @@
 import { signAndPublish } from "@/services/publish";
 import { fetchEventsOnce } from "@/services/relayQuery";
 import { AppError } from "@/services/errors";
-import { relayHttpUrl } from "@/app/config";
+import { activeRelayUrl, relayHttpBase } from "@/features/communities/relayCommunities";
+import { withinCommunitySession } from "@/features/communities/communitySession";
 import { buildNip98AuthHeader } from "@/services/nip98";
 import {
   buildBanEvent,
@@ -192,7 +193,9 @@ class ModerationService {
     if (!canResolveReport(params.actingRole)) {
       throw new AppError("permission_denied", "You don't have permission to do that.");
     }
-    await signAndPublish(buildRemoveUserEvent({ channelId: params.channelId, pubkey: params.pubkey }));
+    await signAndPublish(
+      buildRemoveUserEvent({ channelId: params.channelId, pubkey: params.pubkey }),
+    );
   }
 
   async resolveReport(params: {
@@ -229,21 +232,31 @@ class ModerationService {
     return reportEvent?.tags.find((tag) => tag[0] === "p")?.[1] ?? null;
   }
 
-  private async moderationGet<T>(pathWithQuery: string): Promise<T> {
-    const url = `${relayHttpUrl()}${pathWithQuery}`;
+  private moderationGet<T>(pathWithQuery: string): Promise<T> {
+    return withinCommunitySession(() => this.moderationGetActive<T>(pathWithQuery));
+  }
+
+  private async moderationGetActive<T>(pathWithQuery: string): Promise<T> {
+    const url = `${relayHttpBase(activeRelayUrl.value)}${pathWithQuery}`;
     const authorization = await buildNip98AuthHeader(url, "GET");
     const response = await fetch(url, { headers: { Authorization: authorization } });
     if (!response.ok) {
       if (response.status === 403) {
         throw new AppError("permission_denied", "You don't have permission to do that.");
       }
-      throw new AppError("network", "Can't reach the server right now. Check your connection and try again.");
+      throw new AppError(
+        "network",
+        "Can't reach the server right now. Check your connection and try again.",
+      );
     }
     return (await response.json()) as T;
   }
 
   /** `GET /moderation/reports` — mod-authz gated relay-side; ordinary members get 403. */
-  async listReports(options?: { status?: string; limit?: number }): Promise<ModerationReportSummary[]> {
+  async listReports(options?: {
+    status?: string;
+    limit?: number;
+  }): Promise<ModerationReportSummary[]> {
     const params = new URLSearchParams();
     if (options?.limit != null) params.set("limit", String(options.limit));
     if (options?.status) params.set("status", options.status);

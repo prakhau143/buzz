@@ -1,5 +1,47 @@
 # SWF Buzz — Security
 
+## Current model and Phase 5 audit (2026-09-28)
+
+The production path is the **local Nostr identity** (OLD BUZZ model). The sections after this one
+predate it. Where they describe NIP-46 as "production" or Okta as the sign-in, this section
+takes precedence.
+
+**Identity.**
+- The key is generated or imported **in Rust** (`src-tauri/src/identity/`).
+- It is stored in the OS keyring (service `swf-buzz`, entry `identity_nsec`). The fallback is
+  `identity.key` in the app data dir, used only when the keyring is unusable.
+- Every signature (NIP-42 kind 22242, NIP-98 kind 27235, all events) is made by the Tauri
+  `sign_event` command. The webview receives public keys and signed events only.
+- **Import:**
+  - `nsec` and `ncryptsec` are accepted; `npub` and bare 64-hex are refused (a public key can't
+    sign).
+  - Pasted text is normalised (`nostr:` prefix, quotes, whitespace and invisible characters
+    removed). This can't change which key is decoded; the bech32 checksum still rejects typos.
+  - The input box is cleared when submitted.
+- **Switching or sign-out:**
+  - Tears down the socket, signer, caches and presence before the next identity signs
+    anything (`identitySession.ts`).
+  - Sign-out removes the key and every archived copy from the device.
+
+**Audit results (Phase 5).**
+
+| Check | Result |
+|---|---|
+| Private key in `localStorage` / URLs / logs / relay or HTTP payloads | None found. `localStorage` holds the community address book, read markers and public kind 0 caches only. Logs print public-key fingerprints (`8e428c1c…555f954a`). |
+| Dev signer's fixed test key in the release bundle | Absent (`dist/assets` scanned) |
+| NIP-46 transport secret | Stored with Tauri secure storage, never `localStorage` |
+| Deep links | Parsed in Rust. `join` and `connect` reject non-`ws(s)` schemes (`javascript:`, `file:`, `data:`, `https:`), credentials, paths, queries and fragments inside the relay value, malformed codes and unknown actions. Covered by `deeplink::tests::hostile_or_malformed_links_are_rejected`. A link is only intent; the user confirms and the relay decides. |
+| Membership / roles | Always the relay's answer to a signed request (NIP-42 verdict, NIP-98 `/query`, kind 13534 roster). Client role checks only hide UI. A non-member was verified live to be refused with nothing mutated. |
+| Leave channel / community, edit / delete, moderation | Relay-enforced. The client surfaces the relay's reason, never a local-only success. |
+| Attachments | Fetched with NIP-98 auth into `blob:` URLs that are revoked on unmount (`useAuthorizedMedia`). |
+| Presence | Live events trust only the signer; a `p` tag cannot speak for someone else. |
+
+**Known, accepted.**
+- The CSP `connect-src` allows any `wss:`/`https:` origin, because users choose their relay. The
+  relay address is validated before use.
+- Legacy HTTP-backend paths (`ApiClient` session token, Okta PKCE marker) still use
+  `localStorage`. They are not used by the local-identity flow.
+
 ## No raw private keys, ever
 
 SWF Buzz never generates, stores, transmits, logs, or renders a raw Nostr private key. Concretely:
@@ -94,9 +136,10 @@ discover later.
 
 - Which NIP-46 bunker implementation SWF Buzz targets, and how an Okta identity selects a specific
   bunker/Nostr identity (D2, D3) — infrastructure that does not exist yet in the Buzz stack.
-- Whether `kind:41010` DMs (plaintext to the relay operator, same trust model as channel messages)
-  are an acceptable default for all intended DM use cases, or whether NIP-17 gift-wrap-level
-  privacy is needed for some conversations (D1.G).
+- DM privacy model (decided): DMs are `kind:41010` + `kind:9`, readable by the relay operator —
+  the same trust model as channel messages, and OLD BUZZ-compatible. NIP-17 gift-wrap is
+  deliberately **not** used and not planned (product boundary). Users should not treat DMs as
+  end-to-end encrypted.
 - Whether SWF Buzz needs a Windows code-signing certificate before distribution (D7) — no signing
   step exists anywhere in the reference repo's CI today.
 - ID token signature verification for the Okta flow is not yet implemented (D9) — must be added

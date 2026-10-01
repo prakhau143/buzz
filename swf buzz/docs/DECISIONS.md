@@ -157,3 +157,242 @@ not silently carried forward.
 pubkey-keyed ones, migrate each feature's UI to the new service, verify, *then* delete the old
 protocol/service/store code — not delete-first. Full feature-by-feature gap table and file
 classification: `OLD_BUZZ_PARITY_NO_NOSTR_PLAN.md`.
+
+## D11. D10 superseded: human identity is local Nostr again, not Okta/`okta_sub`
+
+**Decided 2026-09-21** (`PHASE_1_OLD_BUZZ_IDENTITY_IMPLEMENTATION.md`, following
+`SWF_BUZZ_OLD_BUZZ_IDENTITY_MIGRATION_PLAN.md`). D10 above is **historical record of a decision
+that was later reversed, not current architecture** — left as originally written per this
+project's rule against silently rewriting past decisions; this entry is the correction, not an
+edit to D10's text.
+
+**Current architecture**: local Nostr identity (generated/imported client-side, NIP-49-encrypted
+backup, OS keyring storage) is the human identity primitive again — restored in Phase 1, then
+built on directly by Phase 2 (Operator/Owner/Admin/Member via `RELAY_OPERATOR_PUBKEYS`/
+`relay_members`, NIP-42/NIP-98, see `PHASE_2_1_OPERATOR_TERMINOLOGY_AND_HARDENING_AUDIT.md` and
+`SWF_ROLE_MODEL.md`) and Phase 3 (`ChannelService.ts`/`MessageService.ts`/`ThreadService.ts`/
+`ReactionService.ts`/`RelayConnectionService.ts`, all NIP-29 over the same relay — see
+`PHASE_3_OLD_BUZZ_PROTOCOL_AUDIT.md` and `PHASE_3_IMPLEMENTATION_AUDIT.md`). Okta/`okta_sub` is
+**not** the active human-auth path.
+
+**What's left of D10's build**: the `swf-buzz-backend` Rust service (Okta JWKS verification,
+`okta_sub`-keyed `users`/session tables) and the frontend's `*ServiceHttp.ts` /
+`CommunityChannelsView.vue` track still exist in the repository, still compile, and are reachable
+behind a separate route — but they are a second, currently-unused-by-default track, not the live
+one. This decision does not resolve whether that track should eventually be deleted, merged, or
+kept as a genuinely separate deployment mode (e.g. a future non-Nostr enterprise SSO story) —
+that is an open question for whoever next touches identity architecture, tracked here so it isn't
+mistaken for dead code and removed by accident, and not silently decided by this entry.
+
+**Why record this now, in Phase 3**: `PHASE_3_OLD_BUZZ_PROTOCOL_AUDIT.md` §0 found that
+`DECISIONS.md` had never been updated after the Phase 1 reversal, which meant this file — the
+project's own architecture-decision record — was actively wrong about which identity system is
+live. Fixed as part of Phase 3's documentation requirements rather than left for a future phase,
+since an incorrect decisions log is worse than an incomplete one.
+
+## D12. Identity is an explicit application session; "active" means signer + session pubkey + verified NIP-42 AUTH pubkey
+
+**Decided 2026-09-22** (`IDENTITY_SWITCHING_AND_SESSION_LIFECYCLE.md`,
+`PHASE_3_IMPLEMENTATION_AUDIT.md` §19). Triggered by the P0 bug: sign out as member A → import
+operator B → app still rendered A's channels/roster/role. Root causes were entirely in the
+webview (global, never-cleared Vue Query keys; import teardown gated on a signed-in session;
+"connected" treated as "authenticated"; a connect-generation race) — Rust's `replace_identity`
+was already correct.
+
+**Decisions**
+
+1. **One lifecycle, two functions.** `endIdentitySession()` is the *only* teardown (disconnect →
+   clear signer → clear session/access/connection/ui/read/agent stores → `queryClient.clear()`);
+   `beginIdentitySession()` is the *only* way to become an identity on the relay. Sign-out,
+   sign-in, import/switch and silent resume all go through them; no code path may partially reset.
+2. **Active identity is three things that must agree**: `session.pubkey`, the signer in
+   `signingServiceRegistry`, and `connection.authenticatedPubkey` — the pubkey taken from the
+   signed NIP-42 AUTH event itself. `beginIdentitySession` refuses the session if they differ.
+   `status === "connected"` is never evidence of who is authenticated.
+3. **Every Vue Query key is identity-scoped** (`["identity", <pubkey|"anonymous">, …]`,
+   `queryKeys.ts`) *and* the cache is cleared on teardown. Scoping alone would leave A's data
+   resident in memory; clearing alone would leave a window for B to read A's keys. Both.
+4. **Sign-out keeps the key in secure storage** (OLD BUZZ semantics: the *session* ends, the
+   *identity* stays; the login screen then says "Existing identity found"). No reset/delete
+   command was added; switching goes through the existing `replace_identity` (archive, never
+   delete) and recovery through NIP-49 backup import.
+5. **Two role planes, stored separately, never derived from each other**: `session.platformRole`
+   (operator — the relay's answer to NIP-98 on `/operator/*`) and `session.communityRole`
+   (owner/admin/member — `relay_members` after NIP-42). Guarded by `identitySecurity.spec.ts`.
+6. **The relay connection singleton is session-resettable**, not identity-bound: `disconnect()`
+   bumps a connect generation (in-flight handshakes from the previous identity discard their
+   socket), clears the reconnect URL and the authenticated pubkey.
+
+**Not decided here**: whether a future "forget this device" action should delete the archived
+keys from the keyring (today nothing is ever deleted); representation of the relay's Moderator
+platform role (no client probe exists; deliberately absent rather than guessed).
+
+## D13. D12 §4 superseded: SWF sign-out removes the local identity from the device (shared-device policy)
+
+**Decided 2026-09-22**, the same day as D12 (`IDENTITY_SWITCHING_AND_SESSION_LIFECYCLE.md` §3a,
+§3b, §16; `PHASE_3_IMPLEMENTATION_AUDIT.md` §20). D12 §4 kept OLD BUZZ semantics — "sign out ends
+the session, the key stays" — and its "not decided" note left device-forgetting open. SWF Buzz is
+used on shared/work machines: after user A signs out, user B must be able to open the login screen
+and import their own identity without seeing, continuing with, or recovering A's. That is a
+product/security requirement, so it is decided now. **This is a deliberate SWF decision and not
+OLD BUZZ parity** — OLD BUZZ's sign-out keeps the identity; ours removes it.
+
+**Decisions**
+
+1. **Sign out = end the session + securely remove the current identity from this device**, in that
+   order, and it is complete only after Rust re-resolves to "no identity". Implemented as
+   `endIdentitySessionAndRemoveIdentity()`; the session-only `endIdentitySession()` remains the
+   teardown half for the non-sign-out transitions (begin, switch community, switch/replace).
+2. **Deletion is Rust-only**, through the existing identity storage abstraction (`KeyStore` +
+   `secure_store`), by a new `delete_identity` command: keyring entry, `identity.key` (if it holds
+   this key), the identity's archive, every archive recorded in the `identity.archives` manifest,
+   every `identity.previous-*.key` file, the keyring marker and the manifest — then verify. Files
+   are zero-filled before unlinking. Never a frontend-side secret deletion; never returns key
+   material. An environment-supplied identity cannot be removed and says so.
+3. **Failure is never hidden.** If Rust cannot remove the identity, the session is still ended (a
+   safe logged-out state) but the login screen shows "Couldn't remove this identity from this
+   device. Please try again." with a retry; the app never claims the device is clean.
+4. **The user is warned first** (`SignOutDialog`): "Signing out will remove this identity's private
+   key from this device. Make sure you have your nsec, hex private key, or ncryptsec backup if you
+   want to use this identity again." — Cancel / Sign out & remove identity. Informs, never blocks.
+5. **Login state after sign-out is always STATE 1** ("No identity is stored on this device." /
+   Import existing identity / Create new identity / Development only). "Identity found on this
+   device." + Continue exists only for a stored identity not yet signed out (relaunch).
+6. **Archived copies made by "Switch / Import another identity" are removed on the next sign-out**
+   (manifest-tracked). Archives predating the manifest are left alone rather than deleted
+   unrecorded. The switch screen says the archive lasts "until the next sign-out".
+7. **`npub1…` is refused as import input** with one exact message, in the form and in Rust; nothing
+   is derived from a public key. nsec / 64-hex / ncryptsec unchanged.
+8. **No multi-identity picker.** One active identity per device; sign out removes it; the next
+   person imports their own.
+
+Everything else in D12 stands (single lifecycle, three consistency checks, identity-scoped query
+keys + `queryClient.clear()`, separate role planes, session-resettable connection singleton).
+
+## D14. Operator status is evidence, not a boolean: the probe reports its signer, and a mismatch is an error
+
+**Date**: 2026-09-22. Extends D12/D13; supersedes nothing.
+
+**Context.** A user reported importing the operator key and landing in the member UI. The code could
+not distinguish the possible causes: `operatorService.isOperator()` returned `true`/`false` and
+swallowed every failure, so "the relay said 403", "the request never completed" and "the request was
+signed by a different key than the one signing in" all collapsed into "not an operator" — which
+renders as the member UI. Nothing recorded which key had signed the probe, so the report could not
+be diagnosed from outside the process.
+
+**Decision.**
+1. **The operator probe returns evidence.** `OperatorService.probeOperator(relay, forPubkey)` returns
+   `{status, signerPubkey, error, origin}`; `isOperator()` is now `status === 200` over it.
+   `buildNip98Auth` exposes the signed event's pubkey for this purpose.
+2. **A signer/identity mismatch is an explicit failure.** If the probe was signed by a pubkey other
+   than the identity being signed in, `resolveAccess` returns `{kind:"mismatch"}`: an auth error is
+   shown, the signer is cleared, and **nothing is routed**. Routing on another key's answer would
+   sign the wrong person in. Previously this fell through to the member UI.
+3. **Every identity state change is logged with its PUBLIC key** (Rust `log_identity`), so
+   `tauri dev` output is an audit trail of which identity the device holds.
+4. **A development-only diagnostics panel** surfaces Rust identity / session pubkey / signer / NIP-42
+   AUTH pubkey / last probe (status + signer) / both roles / decision / route / cache identities /
+   "stale previous identity". Public information only; tree-shaken from production builds.
+5. **Capabilities come from one place.** `features/access/capabilities.ts` maps the two role planes
+   to UI capabilities; components stop comparing role strings. Operator ≠ owner stays structural.
+6. **Community selection is per identity.** The persisted active community is cleared on session
+   teardown so the next identity's community is resolved for its own pubkey.
+
+**Consequences.** The original report was then diagnosed from the audit line in minutes: the imported
+backup derives to `7e13d4f6…` (the member), not the configured operator `0f61e5e4…` — a key/config
+fact, not a UI bug. No operator was provisioned and `RELAY_OPERATOR_PUBKEYS` was not permanently
+changed (a temporary throwaway key used for E2E was reverted and verified byte-identical). The
+create-identity flow additionally gained a mandatory backup checkpoint — generate → show
+npub/nsec/ncryptsec → two acknowledgements → only then authenticate — so a new identity can never be
+signed in before its owner has had the chance to save it (`PHASE_3_FINAL_IMPLEMENTATION_REPORT.md` §5).
+
+
+## D15. The old operator identity was retired, not recovered: a public key is not a login secret
+
+**Date**: 2026-09-22. Extends D14. Full record: `DEV_RESET_2026_09_22.md`.
+
+**Context.** Sign-in as the configured operator `0f61e5e4…320029` kept landing on
+a member view. D14's diagnostics established why: that value is the operator's
+**public** key, and pasting it into the import field (where a 64-character hex
+is a private key by definition — a public key is the same length) made the app
+parse it as a secret scalar and derive `7e13d4f6…`, a member. The operator's
+actual private key is not available on this machine, and a private key cannot be
+recovered from a public one.
+
+**Decision.** Retire the old operator and provision a new one, rather than
+weaken authentication.
+
+1. **Never map a public key to a private key.** No `publicKey → secretKey`
+   lookup anywhere, no special case for the old operator, no hardcoded operator
+   role in the client. Authentication stays: private key → signature → public
+   key → relay authorization.
+2. **The local development dataset was reset** (all communities, memberships,
+   channels, events, invites and scoped records) in one FK-ordered transaction,
+   after a full `pg_dump` backup outside the repository. Schema, migrations,
+   relay implementation and application source untouched.
+3. **A fresh operator keypair (OPERATOR_A) was generated**; only its PUBLIC key
+   went into `RELAY_OPERATOR_PUBKEYS`. The private key and its NIP-49 encrypted
+   backup live outside the repository and are not in any document or log.
+4. **`communities` cannot be zero** and that is by design, not a failed reset:
+   the relay selects a tenant by HTTP `Host` and fails closed on an unknown one,
+   so it recreates four bare host-binding rows (no owner, no members) on boot.
+   Documented rather than forced away.
+5. **Import is a two-step flow** (D14) and its wording now states what is
+   accepted — nsec · private hex · ncryptsec — and that an npub or public hex
+   cannot sign in. Because raw 64-char public and private hex are
+   indistinguishable by format, the Check-key identity preview is mandatory: it
+   is the only thing that can catch this class of mistake.
+
+**Consequences.** Verified against the real relay with the real credentials:
+OPERATOR_A's private key → NIP-98 200 → `platformRole: operator` → `/operator`;
+MEMBER_A's private key → 403 → NIP-42 → `communityRole: member` → chat UI;
+OPERATOR_A's public key misused as a secret → derives an unrelated identity →
+403. Operator and community roles remain independent planes (`SWF_ROLE_MODEL.md`).
+The old `0f61e5e4…` and `7e13d4f6…` identities have no membership anywhere in
+the reset dataset.
+
+
+## D16. Raw 64-character hex is not a login credential
+
+**Date**: 2026-09-22. Supersedes the import contract in D14 §1 (which accepted
+raw hex behind a preview). Full account: `PHASE_3_FINAL_IMPLEMENTATION_REPORT.md` §24.
+
+**Context.** Twice, an operator's PUBLIC key pasted into the import field
+silently signed the user in as a different identity (`0f61e5e4…`→`7e13d4f6…`,
+then `38eb252a…`→`ff93c238…`). A Nostr private key is 64 hex characters and so
+is a public key: they are **indistinguishable by format**, so no validation can
+tell which one the user meant. D14's identity preview made the mistake visible,
+but the app still happily imported the wrong identity if the preview was not
+read carefully.
+
+**Decision.** Remove the ambiguity from the credential contract instead of
+trying to detect it.
+
+1. **Normal import accepts `nsec` and `ncryptsec` only.** Both are
+   self-describing, so there is nothing to guess.
+2. **Raw 64-char hex is refused** with an explanation, *before* anything is
+   decoded — no Rust call, no preview, no keyring write. An `npub` is refused
+   the same way.
+3. **Enforced in Rust, not only the UI.** `recover_keys_from_input` takes
+   `allow_raw_hex` (default false via the commands) and returns
+   `RAW_HEX_REJECTED`, so the rule survives any caller that skips the form.
+4. **A developer-only opt-in** re-enables raw private hex, shown only when the
+   input is bare hex, with an explicit warning, and still subject to Check key →
+   preview → Import.
+5. **Check key stays a pure validation step**: decode → derive public key →
+   preview. It never stores, connects, assigns a role or routes.
+
+**Consequences.** The failure mode is now unreachable on the normal path: the
+one thing a user could paste that would silently become someone else is no
+longer accepted. Verified live — OPERATOR_A's public hex is refused at the form;
+OPERATOR_A's private key gives NIP-98 200 → `platformRole: operator` →
+`/operator`; MEMBER_A's gives 403 → `communityRole: member`. Authentication is
+unchanged: private key → signature → public key → relay authorization. No
+public→private mapping exists anywhere (D15 §1 still holds).
+
+**Also** (same pass): `probeMembership` now distinguishes a relay 404 ("no
+community at this address") from 403 ("exists, you are not a member"), and
+`discoverMemberships` forgets 404 addresses. Stale address-book entries left by
+the reset were being re-probed on every sign-in, producing a 404 per dead host
+in the console; they are dropped rather than suppressed.
+

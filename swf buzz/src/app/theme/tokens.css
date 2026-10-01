@@ -25,6 +25,23 @@
   --color-primary: #b1592f;
   --color-primary-hover: #9a4b26;
   --color-primary-muted: #f3e2d8;
+  /* Text/icons ON the terracotta fill. Terracotta is dark enough that white
+     clears AA for body text, so this is one token rather than a per-component
+     hard-coded #fff. */
+  --color-on-primary: #ffffff;
+
+  /*
+    `--color-accent` was referenced in 11 places (focus outlines, the unread
+    rail, thread borders) but defined NOWHERE, so those rules resolved to an
+    invalid value — several focus rings were simply invisible. It is an alias
+    of the terracotta accent, which is what every call site intended.
+  */
+  --color-accent: var(--color-primary);
+
+  /* Focus ring — one definition, used by the global :focus-visible rule below. */
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --focus-ring-color: var(--color-primary);
 
   /* Brand — dark green, used by the header wordmark/logo only */
   --color-brand-dark: #1e3128;
@@ -39,6 +56,29 @@
   --color-warning-muted: #f4e9d6;
   --color-agent: #5b6f8c;
   --color-agent-muted: #e6eaf1;
+
+  /*
+    @mentions — one set for people and agents alike. Derived from the accent
+    and the text colour rather than hard-coded, so every theme, accent and
+    colour scheme gets a matching, readable mention: mixing toward the text
+    colour darkens it on light surfaces and lightens it on dark ones.
+  */
+  --color-mention-text: color-mix(in srgb, var(--color-primary) 80%, var(--color-text));
+  --color-mention-bg: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  --color-mention-bg-hover: color-mix(in srgb, var(--color-primary) 19%, transparent);
+  --color-mention-border: color-mix(in srgb, var(--color-primary) 24%, transparent);
+  --color-mention-border-hover: color-mix(in srgb, var(--color-primary) 38%, transparent);
+
+  /*
+    Pinned message bar (Phase G) — a quiet, accent-derived context strip under
+    a conversation header, not an announcement banner. Same derivation rule as
+    mentions, so every theme / accent / scheme gets a matching bar.
+  */
+  --color-pin-text: var(--color-text);
+  --color-pin-bg: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface));
+  --color-pin-bg-hover: color-mix(in srgb, var(--color-primary) 9%, var(--color-surface));
+  --color-pin-border: color-mix(in srgb, var(--color-primary) 16%, var(--color-border));
+  --color-pin-icon: var(--color-primary);
 
   /* Elevation */
   --shadow-sm: 0 1px 2px rgba(36, 35, 33, 0.06);
@@ -75,6 +115,15 @@
   --transition-fast: 120ms ease;
   --transition-normal: 200ms ease;
 
+  /* Stacking order — Phase 3.9, see docs/PHASE_3_CHAT_UI_DESIGN.md §10.
+     Kept as one small scale, not a second token file: use the lowest value
+     that gets a surface above its neighbors, never an arbitrary number. */
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-drawer: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+
   color-scheme: light;
 }
 
@@ -108,6 +157,26 @@ body {
 
 a {
   color: var(--color-primary);
+}
+
+/*
+  One global focus-visible treatment. Previously focus rings were declared
+  piecemeal in 17 component-scoped blocks, several of them against the
+  undefined `--color-accent`, so anything not covered fell back to the browser
+  default — or to nothing. Keyboard users must always see where they are.
+
+  `:focus-visible` (not `:focus`) so a mouse click does not draw a ring.
+*/
+:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-sm);
+}
+
+/* Interactive elements that are not natively focusable still need the ring. */
+[tabindex]:not([tabindex="-1"]):focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 ::selection {

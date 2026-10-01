@@ -1,6 +1,12 @@
+mod admin_http;
 mod auth;
 mod commands;
+mod deeplink;
+mod identity;
+mod notifications;
 mod storage;
+mod pairing;
+mod updater;
 
 use tauri_plugin_deep_link::DeepLinkExt;
 
@@ -37,7 +43,12 @@ pub fn run() {
             );
             let mut matched_any = false;
             for arg in &argv {
-                if is_our_deep_link(arg) {
+                if deeplink::is_swf_link(arg) {
+                    // Warm start: a second launch (e.g. clicking a swfbuzz:// link)
+                    // is forwarded to this already-running instance.
+                    matched_any = true;
+                    deeplink::handle_incoming(app, arg);
+                } else if is_our_deep_link(arg) {
                     matched_any = true;
                     auth::oidc::deliver_incoming_url(app, arg);
                 }
@@ -53,15 +64,35 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
+        // Desktop alerts (Settings → Notifications). Permission is requested by
+        // the frontend only when the person turns alerts on.
+        .plugin(tauri_plugin_notification::init())
+        // Updates: registered with an inert config; SWF's own feed/key are
+        // compiled in (see updater.rs) and used only when both are set.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(auth::oidc::PendingCallback::default())
         .manage(auth::oidc::OktaSession::default())
+        .manage(identity::IdentityState::default())
+        .manage(deeplink::PendingDeepLinks::default())
+        .manage(pairing::PairingHandle::default())
         .setup(|app| {
+            // Load the persisted local identity (OS keyring → identity.key).
+            // Never generates a key and never fails startup.
+            identity::init(app.handle());
+
+            // Cold start: a swfbuzz:// link launches the app with the URL in argv.
+            deeplink::handle_launch_args(app.handle());
+
             let handle = app.handle().clone();
             app.deep_link().on_open_url(move |event| {
                 let urls = event.urls();
                 eprintln!("[oidc diag] on_open_url fired, url count={}", urls.len());
                 for url in urls {
-                    auth::oidc::deliver_incoming_url(&handle, url.as_ref());
+                    if deeplink::is_swf_link(url.as_ref()) {
+                        deeplink::handle_incoming(&handle, url.as_ref());
+                    } else {
+                        auth::oidc::deliver_incoming_url(&handle, url.as_ref());
+                    }
                 }
             });
 
@@ -79,11 +110,44 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Native notifications + Windows taskbar unread overlay.
+            notifications::show_notification,
+            notifications::set_unread_indicator,
+            notifications::notification_permission,
+            // Local Nostr identity (primary login path).
+            identity::commands::get_identity,
+            identity::commands::create_identity,
+            identity::commands::create_identity_with_backup,
+            identity::commands::preview_identity_input,
+            identity::commands::import_identity,
+            identity::commands::replace_identity,
+            identity::commands::delete_identity,
+            identity::commands::create_ncryptsec_backup,
+            identity::commands::save_ncryptsec_backup,
+            identity::commands::verify_ncryptsec_backup,
+            identity::commands::sign_event,
+            identity::commands::nip44_encrypt,
+            identity::commands::nip44_decrypt,
+            // swfbuzz:// deep links (the frontend drains the queue).
+            deeplink::take_pending_deep_links,
+            // TODO(identity-migration): legacy Okta commands — kept until the
+            // local-identity path is verified, then removed (see migration plan §26).
             commands::auth::start_okta_login,
             commands::auth::okta_logout,
             commands::secure_storage::secure_storage_get,
             commands::secure_storage::secure_storage_set,
             commands::secure_storage::secure_storage_delete,
+            // Settings → Updates (SWF's own feed only; inert when not configured).
+            updater::updater_configured,
+            updater::updater_check,
+            updater::updater_install,
+            // Settings → Mobile (NIP-AB; no private key is ever sent — see pairing.rs).
+            pairing::start_pairing,
+            pairing::confirm_pairing_sas,
+            pairing::cancel_pairing,
+            // Deployment admin console (feedback) — scoped to /api/admin/v1/ only.
+            admin_http::admin_request,
+            admin_http::admin_fetch_bytes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -6,6 +6,9 @@ import { fetchEventsOnce } from "@/services/relayQuery";
 import { buildChannelDiscoveryFilter, parseChannelEvent } from "@/protocol/channels";
 import { buildDmVisibilityFilter, parseDmVisibilityEvent } from "@/protocol/dm";
 import type { Channel, Message } from "@/types/domain";
+import type { Attachment } from "@/protocol/imeta";
+import type { TimelineEvent, TimelinePage } from "@/features/messages/MessageService";
+import type { MessageCursor } from "@/features/messages/messageCursor";
 import { Kind41010Transport } from "./Kind41010Transport";
 import type { DmTransport } from "./DmTransport";
 
@@ -68,23 +71,34 @@ class DmService {
     conversationId: string,
     content: string,
     mentionPubkeys?: string[],
+    attachments?: Attachment[],
   ): Promise<Message> {
-    return this.transport.send(conversationId, content, mentionPubkeys);
+    return this.transport.send(conversationId, content, mentionPubkeys, attachments);
   }
 
   hideConversation(conversationId: string): Promise<void> {
     return this.transport.hide(conversationId);
   }
 
-  fetchHistory(conversationId: string): Promise<Message[]> {
+  fetchHistory(conversationId: string): Promise<TimelinePage> {
     return this.transport.fetchHistory(conversationId);
+  }
+
+  /** Keyset-paged older history. See `MessageService.fetchOlderMessages` for why it is not a bare `until`. */
+  fetchOlder(conversationId: string, cursor: MessageCursor): Promise<TimelinePage> {
+    return this.transport.fetchOlder(conversationId, cursor);
+  }
+
+  fetchSince(conversationId: string, since: number): Promise<TimelinePage> {
+    return this.transport.fetchSince(conversationId, since);
   }
 
   subscribeToConversation(
     conversationId: string,
-    onMessage: (message: Message) => void,
+    since: number,
+    onEvent: (event: TimelineEvent) => void,
   ): RelaySubscriptionHandle {
-    return this.transport.subscribe(conversationId, onMessage);
+    return this.transport.subscribe(conversationId, since, onEvent);
   }
 }
 

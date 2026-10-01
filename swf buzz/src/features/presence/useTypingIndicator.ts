@@ -30,10 +30,24 @@ export function useTypingIndicator(channelId: MaybeRefOrGetter<string | null>) {
     );
   }
 
+  /** Cancels every pending expiry. Shared by channel switch and unmount. */
+  function clearExpiryTimers(): void {
+    for (const timer of expiry.values()) clearTimeout(timer);
+    expiry.clear();
+  }
+
   function resubscribe(id: string | null): void {
     liveSub?.close();
     liveSub = null;
     typingPubkeys.value = [];
+    // Without this the previous channel's expiry timers stay armed for up to
+    // TYPING_EXPIRY_MS after the switch, holding Map entries alive with them.
+    // The visible list survives either way — a stale timer filters a pubkey
+    // that is usually absent, and `setTyping` happens to clear it when the same
+    // person types again — so this is a resource leak rather than a rendering
+    // bug, which is exactly why it needs an explicit test rather than an
+    // assertion about what is on screen.
+    clearExpiryTimers();
     if (!id) return;
     liveSub = typingService.subscribe(id, (event) => {
       if (event.pubkey === session.pubkey) return;
@@ -48,7 +62,7 @@ export function useTypingIndicator(channelId: MaybeRefOrGetter<string | null>) {
   );
   onUnmounted(() => {
     liveSub?.close();
-    for (const timer of expiry.values()) clearTimeout(timer);
+    clearExpiryTimers();
   });
 
   function notifyTyping(): void {

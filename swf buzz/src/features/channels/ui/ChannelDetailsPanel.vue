@@ -1,18 +1,28 @@
 <script setup lang="ts">
+import CloseButton from "@/components/CloseButton.vue";
 import { ref } from "vue";
-import { useRouter } from "vue-router";
 import BaseButton from "@/components/BaseButton.vue";
 import { channelService } from "../ChannelService";
 import { logError, userMessageFor } from "@/services/errors";
+import { useEscapeKey } from "@/composables/useEscapeKey";
 import type { Channel } from "@/types/domain";
 
 const props = defineProps<{ channel: Channel; memberCount: number }>();
 const emit = defineEmits<{ close: []; left: [] }>();
 
-const router = useRouter();
 const showLeaveConfirm = ref(false);
 const isLeaving = ref(false);
 const leaveError = ref<string | null>(null);
+
+// Only close on Escape while no confirm dialog is layered on top of this
+// panel — otherwise Escape should dismiss that instead.
+useEscapeKey(() => {
+  if (showLeaveConfirm.value) {
+    showLeaveConfirm.value = false;
+  } else {
+    emit("close");
+  }
+});
 
 async function confirmLeave() {
   isLeaving.value = true;
@@ -20,8 +30,8 @@ async function confirmLeave() {
   try {
     await channelService.leaveChannel(props.channel.id);
     showLeaveConfirm.value = false;
+    // Only after the relay's OK: the parent refreshes membership/channels and moves on.
     emit("left");
-    await router.push({ name: "channels" });
   } catch (err) {
     logError("ChannelDetailsPanel.leave", err);
     leaveError.value = userMessageFor(err);
@@ -35,7 +45,7 @@ async function confirmLeave() {
   <div class="details-panel">
     <div class="panel-header">
       <h2>Channel Settings</h2>
-      <button type="button" class="close-button" aria-label="Close" @click="emit('close')">✕</button>
+      <CloseButton @click="emit('close')" />
     </div>
 
     <div class="panel-body">
@@ -64,7 +74,18 @@ async function confirmLeave() {
         </div>
       </div>
 
-      <BaseButton variant="danger" class="leave-button" @click="showLeaveConfirm = true">
+      <!-- Same rule as OLD BUZZ (ChannelManagementSheet `canLeave`): an archived
+           channel can't be left — the relay refuses it with "channel is archived". -->
+      <p v-if="channel.archived" class="archived-note" data-testid="channel-archived-note">
+        This channel is archived. It can't be left or changed.
+      </p>
+      <BaseButton
+        v-else
+        variant="danger"
+        class="leave-button"
+        data-testid="leave-channel"
+        @click="showLeaveConfirm = true"
+      >
         🚪 Leave channel
       </BaseButton>
     </div>
@@ -180,7 +201,7 @@ async function confirmLeave() {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 110;
+  z-index: var(--z-modal);
 }
 .confirm-card {
   width: 340px;
@@ -206,5 +227,10 @@ async function confirmLeave() {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2);
+}
+.archived-note {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
 }
 </style>

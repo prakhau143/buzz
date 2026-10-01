@@ -1,8 +1,11 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { useSessionStore } from "@/stores/session";
+import { useAccessStore } from "@/stores/access";
 import { isPlatformAdminConfigured } from "@/features/platform-admin/usePlatformAdmin";
 import { attemptSilentResume } from "@/features/auth/useAuth";
 import { getPendingInviteToken } from "@/features/communities/pendingInvite";
+import { useUiStore } from "@/stores/ui";
+import { installContextPanelInvariant } from "@/features/navigation/contextPanelPolicy";
 
 const router = createRouter({
   history: createWebHistory(),
@@ -41,6 +44,12 @@ const router = createRouter({
       props: (route) => ({ channelId: route.query.channelId ?? null }),
     },
     {
+      // The Inbox workspace (list | detail | profile) — a route, not a modal.
+      path: "/inbox",
+      name: "inbox",
+      component: () => import("@/views/InboxView.vue"),
+    },
+    {
       path: "/dm",
       name: "dm",
       component: () => import("@/views/DmView.vue"),
@@ -63,12 +72,118 @@ const router = createRouter({
       component: () => import("@/views/CommunityDmView.vue"),
     },
     {
+      // Where swfbuzz:// deep links land, and the manual "join with invite" screen.
+      // Public so the guard does not try to resume a session first: joining only
+      // needs the local identity to sign one HTTP request, and works before any
+      // membership exists.
+      path: "/join",
+      name: "join",
+      component: () => import("@/views/JoinCommunityView.vue"),
+      meta: { public: true },
+    },
+    {
+      // Signed-in identity that belongs to no community yet: join with an invite.
+      // Public so the guard doesn't demand a relay session — the views themselves
+      // need the local identity and redirect to /login without one.
+      path: "/welcome",
+      name: "welcome",
+      component: () => import("@/views/WelcomeView.vue"),
+      meta: { public: true },
+    },
+    {
+      // A relay operator's home: the communities they own (and belong to), and
+      // "Create Community". Operator status is the relay's answer, not a flag.
+      path: "/operator",
+      name: "operator",
+      component: () => import("@/views/OperatorDashboardView.vue"),
+      meta: { public: true },
+    },
+    {
+      // Member of several communities: pick one. The list is the identity's actual
+      // memberships as answered by each relay — not a URL selector.
+      path: "/communities",
+      name: "communities",
+      component: () => import("@/views/CommunityPickerView.vue"),
+      meta: { public: true },
+    },
+    {
+      // First-run kind:0 profile (asked once, after the user is in a community).
+      path: "/profile-setup",
+      name: "profile-setup",
+      component: () => import("@/views/ProfileSetupView.vue"),
+    },
+    {
       // Public invite landing page (DECISIONS.md D10) — reachable without a
       // session; see InviteLandingView.vue's own doc comment.
       path: "/invite/:token",
       name: "invite",
       component: () => import("@/views/InviteLandingView.vue"),
       meta: { public: true },
+    },
+    {
+      // Full-screen Settings (docs/OLD_BUZZ_SETTINGS_FEEDBACK_AUDIT.md §2): replaces
+      // the app chrome entirely. `?section=` picks the page; `?from=` is where
+      // "Back to app" returns.
+      path: "/settings",
+      name: "settings",
+      component: () => import("@/features/settings/ui/SettingsView.vue"),
+      meta: { fullscreen: true },
+    },
+    // ---- Mobile (< 768px): a single navigation stack + bottom nav, its own
+    // routes so every level is a history entry (features/mobile/mobileRoutes.ts).
+    // `meta.mobile` makes App.vue drop the desktop header and rail. The same
+    // session guard applies as for the desktop in-community routes.
+    {
+      path: "/m",
+      name: "mobile-home",
+      component: () => import("@/features/mobile/views/MobileHomeView.vue"),
+      meta: { mobile: true },
+    },
+    {
+      path: "/m/c/:channelId",
+      name: "mobile-channel",
+      component: () => import("@/features/mobile/views/MobileChannelView.vue"),
+      props: true,
+      meta: { mobile: true },
+    },
+    {
+      path: "/m/c/:channelId/t/:rootId",
+      name: "mobile-thread",
+      component: () => import("@/features/mobile/views/MobileThreadView.vue"),
+      props: true,
+      meta: { mobile: true },
+    },
+    {
+      path: "/m/d/:conversationId",
+      name: "mobile-dm",
+      component: () => import("@/features/mobile/views/MobileDmView.vue"),
+      props: true,
+      meta: { mobile: true },
+    },
+    {
+      path: "/m/d/:conversationId/t/:rootId",
+      name: "mobile-dm-thread",
+      component: () => import("@/features/mobile/views/MobileThreadView.vue"),
+      props: (route) => ({ channelId: route.params.conversationId, rootId: route.params.rootId, dm: true }),
+      meta: { mobile: true },
+    },
+    {
+      path: "/m/inbox",
+      name: "mobile-inbox",
+      component: () => import("@/features/mobile/views/MobileInboxView.vue"),
+      meta: { mobile: true },
+    },
+    {
+      path: "/m/search",
+      name: "mobile-search",
+      component: () => import("@/features/mobile/views/MobileSearchView.vue"),
+      meta: { mobile: true },
+    },
+    {
+      path: "/m/profile",
+      name: "mobile-profile",
+      component: () => import("@/features/mobile/views/MobileProfileView.vue"),
+      meta: { mobile: true },
     },
     {
       path: "/platform-admin",
@@ -127,10 +242,25 @@ router.beforeEach(async (to) => {
 
   const session = useSessionStore();
   if (!to.meta.public && !session.isReady) {
+    // A local identity that is signed in but has not entered a community yet
+    // (Operator, several communities, or none) goes to the screen the central
+    // routing decision chose — never back to a login that asks for nothing new.
+    const destination = useAccessStore().destination;
+    if (session.authMode === "local" && session.pubkey && destination) {
+      return { name: destination };
+    }
     return { name: "login" };
   }
   if (to.name === "login" && session.isReady) {
     return { name: "home" };
+  }
+  // The local identity (OLD-BUZZ-style, no Okta) has no `swf-buzz-backend`
+  // session, and Home is HTTP-backend based — so it lands on the Nostr channels
+  // view, its primary UI. Legacy (Okta/dev) sessions keep landing on Home.
+  // TODO(identity-migration): the invite flow below is HTTP/Okta-based and is
+  // migrated in a later phase; it is skipped for local-identity sessions.
+  if (to.name === "home" && session.authMode === "local") {
+    return { name: "channels" };
   }
   // `loginWithOkta()` (`useAuth.ts`) unconditionally lands on `home`
   // once login succeeds — it has no notion of "return to where I was."
@@ -149,5 +279,11 @@ router.beforeEach(async (to) => {
   }
   return true;
 });
+
+// A view's context panel (thread / profile / details) never outlives the view:
+// moving to another view closes it, so Inbox / Settings / Search… always start
+// full width (features/navigation/contextPanelPolicy.ts). `useUiStore()` is
+// resolved per navigation, when Pinia is long active.
+installContextPanelInvariant(router, () => useUiStore().closeContextPanel());
 
 export default router;

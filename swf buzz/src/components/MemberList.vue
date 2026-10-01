@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import StateView from "./StateView.vue";
 import MemberRow from "./MemberRow.vue";
-import { usePresence } from "@/features/presence/usePresence";
 import type { Member } from "@/types/domain";
 
 defineProps<{ members: Member[]; isLoading: boolean; isError: boolean }>();
 defineEmits<{ retry: [] }>();
 
-const { data: presence } = usePresence();
 </script>
 
 <template>
@@ -25,7 +23,6 @@ const { data: presence } = usePresence();
       v-for="member in members"
       :key="member.pubkey"
       :member="member"
-      :presence="presence?.get(member.pubkey)?.status"
     />
   </ul>
 </template>

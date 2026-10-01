@@ -22,6 +22,20 @@ export interface NostrFilter {
   kinds?: number[];
   since?: number;
   until?: number;
+  /**
+   * Buzz protocol extension on top of `until`, NOT vanilla NIP-01 — the relay
+   * parses it in `crates/buzz-relay/src/protocol.rs:108-111` and turns the pair
+   * into a composite keyset predicate
+   * (`crates/buzz-db/src/store/event.rs:626-636`):
+   *
+   *   created_at < until  OR  (created_at = until AND id > before_id)
+   *
+   * Without it, `until` alone is `created_at <= until` — INCLUSIVE — so paging
+   * by timestamp re-delivers the boundary second and a client that filters it
+   * out loses every other message sharing that second. A relay that does not
+   * understand the field simply ignores it, degrading to the old behaviour.
+   */
+  before_id?: string;
   limit?: number;
   search?: string;
   [tagFilter: `#${string}`]: string[] | undefined;

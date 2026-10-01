@@ -1,5 +1,24 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DevSigningService } from "@/features/signing/signingService.dev";
+
+describe("DevSigningService — production guard (docs/SECURITY.md)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("refuses to construct outside a dev build", () => {
+    vi.stubEnv("DEV", false);
+    expect(() => new DevSigningService()).toThrow(/development-only/);
+    expect(() => new DevSigningService("ephemeral")).toThrow(/development-only/);
+  });
+
+  // The path that matters: in an Okta-configured production build this would
+  // otherwise turn a user's non-secret Okta `sub` into their Nostr secret key.
+  it("refuses to derive an Okta-seeded identity outside a dev build", async () => {
+    vi.stubEnv("DEV", false);
+    await expect(DevSigningService.forLocalIdentity("okta-subject-abc123")).rejects.toThrow(
+      /development-only/,
+    );
+  });
+});
 
 describe("DevSigningService", () => {
   it("produces a stable public key for the session", async () => {

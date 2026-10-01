@@ -1,4 +1,5 @@
 import { QueryClient } from "@tanstack/vue-query";
+import { StaleCommunitySessionError } from "@/features/communities/communitySession";
 
 /**
  * All relay-backed server state (channels, messages, threads, DMs, members,
@@ -9,7 +10,10 @@ export function createAppQueryClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
       queries: {
-        retry: 1,
+        // A fetch from an ended community session is not retried: its answer
+        // belongs to a community the user has left (communitySession.ts).
+        retry: (failureCount, error) =>
+          !(error instanceof StaleCommunitySessionError) && failureCount < 1,
         refetchOnWindowFocus: false,
         gcTime: 5 * 60 * 1000,
         staleTime: 10 * 1000,

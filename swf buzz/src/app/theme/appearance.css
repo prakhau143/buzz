@@ -1,0 +1,194 @@
+/*
+  Appearance layer on top of tokens.css. Every rule here only re-assigns the
+  SAME custom properties components already consume, driven by attributes on
+  <html> set from Settings -> Appearance (src/features/appearance/appearance.ts).
+  `swf-light` is the tokens.css default and needs no block.
+*/
+
+/* ---------- Light themes ---------- */
+html[data-theme="paper"] {
+  --color-bg: #f5f6f8;
+  --color-surface: #ffffff;
+  --color-surface-muted: #eef0f3;
+  --color-surface-hover: #e6e9ee;
+  --color-text: #1d2129;
+  --color-text-muted: #5d6573;
+  --color-text-subtle: #8b93a1;
+  --color-border: #e1e5ea;
+  --color-border-strong: #cdd3dc;
+}
+html[data-theme="sky"] {
+  --color-bg: #f1f6fb;
+  --color-surface: #ffffff;
+  --color-surface-muted: #e8f0f8;
+  --color-surface-hover: #dde8f4;
+  --color-text: #15212f;
+  --color-text-muted: #56677b;
+  --color-text-subtle: #8394a8;
+  --color-border: #d9e4ef;
+  --color-border-strong: #c3d3e4;
+}
+
+/* ---------- Dark themes (navy / charcoal, restrained) ---------- */
+html[data-color-scheme="dark"] {
+  --color-overlay: rgba(4, 7, 14, 0.62);
+  --color-text-on-accent: #ffffff;
+  --color-brand-dark: #d9e9df;
+  --color-brand: #8fc2a1;
+  --color-danger: #f07b6c;
+  --color-danger-muted: rgba(240, 123, 108, 0.14);
+  --color-success: #7cc48a;
+  --color-success-muted: rgba(124, 196, 138, 0.14);
+  --color-warning: #e2b25c;
+  --color-warning-muted: rgba(226, 178, 92, 0.14);
+  --color-agent: #9db1d6;
+  --color-agent-muted: rgba(157, 177, 214, 0.14);
+  /* Mentions: dark surfaces swallow a light-scheme tint, so it is stronger here.
+     Still accent-derived — the accent's own dark value comes from [data-accent]. */
+  --color-mention-bg: color-mix(in srgb, var(--color-primary) 17%, transparent);
+  --color-mention-bg-hover: color-mix(in srgb, var(--color-primary) 26%, transparent);
+  --color-mention-border: color-mix(in srgb, var(--color-primary) 32%, transparent);
+  --color-mention-border-hover: color-mix(in srgb, var(--color-primary) 48%, transparent);
+  --color-pin-bg: color-mix(in srgb, var(--color-primary) 9%, var(--color-surface));
+  --color-pin-bg-hover: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface));
+  --color-pin-border: color-mix(in srgb, var(--color-primary) 26%, var(--color-border));
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 18px 44px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+html[data-theme="swf-dark"] {
+  --color-bg: #0e1320;
+  --color-surface: #141a2a;
+  --color-surface-muted: #1a2135;
+  --color-surface-hover: #212a41;
+  --color-text: #e7eaf3;
+  --color-text-muted: #a0a9bd;
+  --color-text-subtle: #6f7a91;
+  --color-border: #242d44;
+  --color-border-strong: #313c58;
+}
+html[data-theme="midnight"] {
+  --color-bg: #080b14;
+  --color-surface: #0e121e;
+  --color-surface-muted: #141a2a;
+  --color-surface-hover: #1a2135;
+  --color-text: #e4e8f4;
+  --color-text-muted: #98a1b6;
+  --color-text-subtle: #677089;
+  --color-border: #1c2336;
+  --color-border-strong: #293249;
+}
+html[data-theme="graphite"] {
+  --color-bg: #121314;
+  --color-surface: #191a1c;
+  --color-surface-muted: #202124;
+  --color-surface-hover: #28292d;
+  --color-text: #ececee;
+  --color-text-muted: #a4a5ab;
+  --color-text-subtle: #75767d;
+  --color-border: #2a2b2f;
+  --color-border-strong: #37383d;
+}
+html[data-theme="ocean"] {
+  --color-bg: #0a171d;
+  --color-surface: #0f1f27;
+  --color-surface-muted: #142830;
+  --color-surface-hover: #1a313b;
+  --color-text: #e3eef1;
+  --color-text-muted: #98b0b8;
+  --color-text-subtle: #66808a;
+  --color-border: #1c3540;
+  --color-border-strong: #274552;
+}
+
+/* ---------- Accent ---------- */
+html[data-accent="terracotta"] {
+  --color-primary: #b1592f;
+  --color-primary-hover: #9a4b26;
+}
+html[data-color-scheme="dark"][data-accent="terracotta"] {
+  --color-primary: #d9784b;
+  --color-primary-hover: #e58c63;
+}
+html[data-accent="indigo"] {
+  --color-primary: #4f5bd5;
+  --color-primary-hover: #4250c4;
+}
+html[data-color-scheme="dark"][data-accent="indigo"] {
+  --color-primary: #7c86f0;
+  --color-primary-hover: #939cf5;
+}
+html[data-accent="emerald"] {
+  --color-primary: #1f8a5b;
+  --color-primary-hover: #19774e;
+}
+html[data-color-scheme="dark"][data-accent="emerald"] {
+  --color-primary: #3fb67f;
+  --color-primary-hover: #57c592;
+}
+html[data-accent="violet"] {
+  --color-primary: #7a4fd0;
+  --color-primary-hover: #6a42bd;
+}
+html[data-color-scheme="dark"][data-accent="violet"] {
+  --color-primary: #a07ef0;
+  --color-primary-hover: #b194f5;
+}
+html[data-accent="rose"] {
+  --color-primary: #c33e62;
+  --color-primary-hover: #ad3456;
+}
+html[data-color-scheme="dark"][data-accent="rose"] {
+  --color-primary: #ec6f90;
+  --color-primary-hover: #f286a3;
+}
+html[data-accent="amber"] {
+  --color-primary: #b36b00;
+  --color-primary-hover: #9c5d00;
+}
+html[data-color-scheme="dark"][data-accent="amber"] {
+  --color-primary: #e3a33b;
+  --color-primary-hover: #ebb45a;
+}
+html[data-accent="cyan"] {
+  --color-primary: #0b7f95;
+  --color-primary-hover: #086e82;
+}
+html[data-color-scheme="dark"][data-accent="cyan"] {
+  --color-primary: #3cbad0;
+  --color-primary-hover: #5ac8da;
+}
+html[data-accent] {
+  /* Tints follow the accent AND the surface, so they work in both schemes. */
+  --color-primary-muted: color-mix(in srgb, var(--color-primary) 16%, var(--color-surface));
+}
+html[data-color-scheme="dark"] ::selection {
+  background: color-mix(in srgb, var(--color-primary) 35%, transparent);
+}
+
+/* ---------- Text size (OLD BUZZ: 13 / 14 / 15 base) ---------- */
+html[data-font-size="smaller"] {
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-md: 13px;
+  --font-size-lg: 15px;
+  --font-size-xl: 18px;
+}
+html[data-font-size="larger"] {
+  --font-size-xs: 13px;
+  --font-size-sm: 14px;
+  --font-size-md: 15px;
+  --font-size-lg: 17px;
+  --font-size-xl: 22px;
+}
+
+/* ---------- Conversation density (message rows) ---------- */
+html[data-density="compact"] .message {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+html[data-density="spacious"] .message {
+  padding-top: var(--space-3);
+  padding-bottom: var(--space-3);
+}

@@ -3,6 +3,9 @@
  * conversion from raw Nostr events happens exclusively in `src/protocol/`.
  * See docs/PROTOCOL_IMPLEMENTATION_REFERENCE.md for the wire-format source of truth.
  */
+import type { Attachment } from "@/protocol/imeta";
+
+export type { Attachment };
 
 export type ConnectionStatus =
   "connecting" | "connected" | "disconnected" | "reconnecting" | "auth_failed" | "error";
@@ -11,6 +14,15 @@ export interface UserProfile {
   pubkey: string;
   displayName: string;
   avatarUrl?: string;
+  about?: string;
+  /**
+   * Job title, e.g. "Solutions Architect" — an SWF extension to kind:0.
+   * Deliberately NOT the community role (Owner/Admin/Member), which is
+   * system-controlled and comes from `relay_members`.
+   */
+  designation?: string;
+  /** kind:0 schema version. Absent in a profile written before versioning ⇒ 1. */
+  profileVersion?: number;
   isAgent: boolean;
 }
 
@@ -42,6 +54,8 @@ export interface Reaction {
   count: number;
   reactedByMe: boolean;
   reactorPubkeys: string[];
+  /** reactorPubkey -> the reaction (kind:7) event id they published — needed to unreact via kind:5. */
+  reactorEventIds: Record<string, string>;
 }
 
 export interface Message {
@@ -52,10 +66,24 @@ export interface Message {
   createdAt: number;
   thread: ThreadMarkers;
   mentions: string[];
+  /**
+   * The event carries the semantic `@everyone` tag (protocol/messages.ts
+   * `EVERYONE_MENTION_TAG`). Never inferred from the text alone.
+   */
+  mentionsEveryone?: boolean;
   reactions: Reaction[];
   status: MessageStatus;
   isSystemMessage: boolean;
   isAgentMessage: boolean;
+  /**
+   * When an authorized kind:40003 edit has been applied, `content` above is the
+   * edited text and this is when that edit was published. The original event is
+   * never mutated or discarded — the overlay is recomputed from the events held,
+   * so a late-arriving earlier edit cannot displace a newer one.
+   */
+  editedAt?: number;
+  /** NIP-92 `imeta` attachments, in tag order. Empty for a plain text message. */
+  attachments: Attachment[];
 }
 
 export interface ThreadSummary {
@@ -190,6 +218,21 @@ export interface AdminFeedback {
   category: string | null;
   bodySummary: string;
   status: "new" | "reviewed" | "archived";
+  receivedAt: string;
+}
+
+/** `GET /api/admin/v1/feedback/{id}` (crates/buzz-db/src/store/admin_moderation.rs:147-176). */
+export interface AdminFeedbackDetail {
+  id: string;
+  communityId: string | null;
+  communityHost: string | null;
+  eventId: string;
+  submitterPubkey: string;
+  category: string | null;
+  body: string;
+  tags: string[][];
+  status: "new" | "reviewed" | "archived";
+  eventCreatedAt: string;
   receivedAt: string;
 }
 

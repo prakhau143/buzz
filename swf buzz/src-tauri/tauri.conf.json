@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https: wss: ws:; img-src 'self' data: blob: https: http:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com"
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https: wss: ws:; img-src 'self' data: blob: https: http:; media-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com"
     }
   },
   "bundle": {
@@ -37,8 +37,15 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["com.okta.trial-7050986"]
+        "schemes": [
+          "com.okta.trial-7050986",
+          "swfbuzz"
+        ]
       }
+    },
+    "updater": {
+      "pubkey": "",
+      "endpoints": []
     }
   }
 }

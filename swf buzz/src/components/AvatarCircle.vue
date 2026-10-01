@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import PresenceDot from "@/features/presence/PresenceDot.vue";
+import { usePresenceOf } from "@/features/presence/presenceSync";
+import type { PresenceStatus } from "@/protocol/presence";
 
 const props = withDefaults(
   defineProps<{
@@ -7,13 +10,27 @@ const props = withDefaults(
     avatarUrl?: string;
     size?: number;
     isAgent?: boolean;
-    presence?: "online" | "away" | "offline";
+    /** Explicit status (rare). Normally pass `pubkey` and the presence store answers. */
+    presence?: PresenceStatus;
+    /**
+     * Whose avatar this is. With it, the dot comes from the one presence store,
+     * keyed by pubkey — so the same person shows the same status everywhere.
+     */
+    pubkey?: string | null;
+    /** Opt out for avatars that are not a person's live status (e.g. a thread's participant stack). */
+    showPresence?: boolean;
   }>(),
-  { size: 32, isAgent: false },
+  { size: 32, isAgent: false, pubkey: null, showPresence: true, presence: undefined },
 );
 
+const storeStatus = usePresenceOf(() => (props.presence ? null : props.pubkey));
+const status = computed(() => (props.showPresence ? (props.presence ?? storeStatus.value) : null));
+
+// A parenthetical ("Scout (Support Agent)") is a qualifier, not part of the
+// name — without this the second initial was a literal "(".
 const initials = computed(() =>
   props.name
+    .replace(/\([^)]*\)?/g, " ")
     .trim()
     .split(/\s+/)
     .slice(0, 2)
@@ -28,7 +45,7 @@ const initials = computed(() =>
       <img v-if="avatarUrl" :src="avatarUrl" :alt="name" />
       <span v-else>{{ initials || "?" }}</span>
     </div>
-    <span v-if="presence" class="presence-dot" :class="presence" />
+    <PresenceDot v-if="status" :status="status" class="avatar-presence" />
   </div>
 </template>
 
@@ -64,7 +81,7 @@ const initials = computed(() =>
   object-fit: cover;
 }
 
-.presence-dot {
+.avatar-presence {
   position: absolute;
   right: -1px;
   bottom: -1px;
@@ -72,14 +89,8 @@ const initials = computed(() =>
   height: 30%;
   min-width: 8px;
   min-height: 8px;
-  border-radius: 50%;
+  max-width: 16px;
+  max-height: 16px;
   border: 2px solid var(--color-surface);
-  background: var(--color-text-subtle);
-}
-.presence-dot.online {
-  background: var(--color-success);
-}
-.presence-dot.away {
-  background: var(--color-warning);
 }
 </style>

@@ -11,18 +11,19 @@ import { ref } from "vue";
 import AppShell from "@/layouts/AppShell.vue";
 import StateView from "@/components/StateView.vue";
 import BaseButton from "@/components/BaseButton.vue";
-import { useAuth } from "@/features/auth/useAuth";
-import { useAdminFeedback, useAdminOperators, useAdminProbe, useAdminReports } from "../usePlatformAdmin";
+import { useSignOut } from "@/features/auth/useSignOut";
+import SignOutDialog from "@/features/auth/ui/SignOutDialog.vue";
+import { useAdminOperators, useAdminProbe, useAdminReports } from "../usePlatformAdmin";
+import FeedbackInbox from "./FeedbackInbox.vue";
 import { userMessageFor } from "@/services/errors";
 
-const { logout } = useAuth();
+const { showConfirm: showSignOut, requestSignOut, confirmSignOut, cancelSignOut, isSigningOut } = useSignOut();
 const { data: probe, isLoading: probeLoading, isError: probeError } = useAdminProbe();
 
 const tab = ref<"reports" | "feedback" | "staff">("reports");
 
 const { data: reports, isLoading: reportsLoading, isError: reportsError, resolve, isResolving } =
   useAdminReports();
-const { data: feedback, isLoading: feedbackLoading, isError: feedbackError } = useAdminFeedback();
 const {
   data: operators,
   isLoading: operatorsLoading,
@@ -70,9 +71,10 @@ async function handleAddOperator() {
           </button>
         </nav>
         <div class="sidebar-footer">
-          <BaseButton variant="ghost" @click="logout">Sign out</BaseButton>
+          <BaseButton variant="ghost" @click="requestSignOut">Sign out</BaseButton>
         </div>
       </div>
+      <SignOutDialog v-if="showSignOut" :busy="isSigningOut" @close="cancelSignOut" @confirm="confirmSignOut" />
     </template>
 
     <template #main>
@@ -119,16 +121,7 @@ async function handleAddOperator() {
 
         <template v-else-if="tab === 'feedback'">
           <h1>Product feedback</h1>
-          <StateView v-if="feedbackLoading" kind="loading" />
-          <StateView v-else-if="feedbackError" kind="error" title="Couldn't load feedback" />
-          <StateView v-else-if="!feedback?.length" kind="empty" title="No feedback yet" />
-          <ul v-else class="feedback-list">
-            <li v-for="item in feedback" :key="item.id" class="feedback-row">
-              <span class="feedback-category">{{ item.category ?? "uncategorized" }}</span>
-              <p class="feedback-body">{{ item.bodySummary }}</p>
-              <span class="feedback-status">{{ item.status }}</span>
-            </li>
-          </ul>
+          <FeedbackInbox />
         </template>
 
         <template v-else-if="tab === 'staff' && canStaff">

@@ -71,7 +71,7 @@ swf buzz/
 │   │   ├── reactions/
 │   │   ├── invites/
 │   │   ├── presence/
-│   │   └── agents/                                     # Agent identity, mentions, status/activity
+│   │   └── mentions/                                   # community-wide @mentions: model, directory, picker, chip, hover card
 │   └── main.ts
 │
 ├── src-tauri/
@@ -178,7 +178,7 @@ Centralized CSS custom properties (`src/app/theme/tokens.css`) define the cream/
 Agents are ordinary Nostr participants from the protocol's point of view (§10 of `PROTOCOL_IMPLEMENTATION_REFERENCE.md`). The `features/agents/` module is responsible for:
 
 - Resolving which pubkeys are agents (via `kind:30177`/`kind:30175` lookups, cached in Vue Query) and exposing an `isAgent(pubkey)` helper + badge component.
-- `@mention` autocomplete that resolves a typed name to a pubkey and inserts the correct `p` tag (§10 tag convention) — purely a compose-time UI convenience, not a new protocol feature.
-- A status/activity indicator (not a chat message) driven by `kind:24200` observer frames with `kind:20002` typing as fallback, per the product requirement to never dump agent execution telemetry into the message timeline.
+- `@mention` is **not** agent-specific: one community-wide system in `features/mentions/` (picker, rendered chip, hover card) serves people and agents alike, with `isAgent` as identity metadata only. The wire format stays a plain `p` tag (§10 tag convention). See `docs/OLD_BUZZ_MENTION_AUDIT.md` and `docs/MENTION_IMPLEMENTATION_REPORT.md`.
+- ~~A status/activity indicator driven by `kind:24200` observer frames~~ — **removed (2026-09-28, product boundary).** SWF has no managed-agent concept: no observer feed, no "X is working" bar, no Agents/Projects inbox filters. See `docs/PRODUCT_BOUNDARY_SESSION_CLOSURE.md`.
 
-The client never spawns, configures, or manages an agent process — it only publishes/subscribes to the events above.
+The client never spawns, configures, or manages an agent process. Messages from external participants who happen to be agents are ordinary messages.

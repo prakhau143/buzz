@@ -10,7 +10,8 @@ const { data: profile } = useProfile(() => props.pubkey);
   <AvatarCircle
     :name="profile?.displayName ?? pubkey?.slice(0, 8) ?? 'Unknown'"
     :avatar-url="profile?.avatarUrl"
-    :size="20"
+    :pubkey="pubkey"
+    :size="22"
   />
   <span class="dm-name">{{ profile?.displayName ?? pubkey?.slice(0, 8) ?? "Unknown" }}</span>
 </template>

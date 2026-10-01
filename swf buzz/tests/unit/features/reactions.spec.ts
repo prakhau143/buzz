@@ -27,7 +27,13 @@ describe("groupReactions", () => {
       null,
     );
     expect(grouped.get(TARGET)).toEqual([
-      { emoji: "👍", count: 2, reactedByMe: false, reactorPubkeys: ["alice", "bob"] },
+      {
+        emoji: "👍",
+        count: 2,
+        reactedByMe: false,
+        reactorPubkeys: ["alice", "bob"],
+        reactorEventIds: { alice: "id", bob: "id" },
+      },
     ]);
   });
 
@@ -69,7 +75,13 @@ describe("applyReaction", () => {
     );
     expect(next.get(TARGET)).toEqual([
       { emoji: "👍", count: 3, reactedByMe: false, reactorPubkeys: ["a", "b", "c"] },
-      { emoji: "😄", count: 1, reactedByMe: false, reactorPubkeys: ["d"] },
+      {
+        emoji: "😄",
+        count: 1,
+        reactedByMe: false,
+        reactorPubkeys: ["d"],
+        reactorEventIds: { d: "id" },
+      },
     ]);
   });
 
@@ -83,6 +95,7 @@ describe("applyReaction", () => {
       count: 2,
       reactedByMe: false,
       reactorPubkeys: ["a", "b"],
+      reactorEventIds: { b: "id" },
     });
   });
 

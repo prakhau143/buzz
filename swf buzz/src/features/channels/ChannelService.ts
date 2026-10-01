@@ -4,6 +4,7 @@ import {
 } from "@/services/RelayConnectionService";
 import { fetchEventsOnce } from "@/services/relayQuery";
 import { signAndPublish } from "@/services/publish";
+import { AppError } from "@/services/errors";
 import {
   buildChannelDiscoveryFilter,
   buildCreateChannelEvent,
@@ -55,10 +56,19 @@ class ChannelService {
     );
   }
 
+  /**
+   * The channel roster — and therefore the answer to "is this identity a
+   * member?". Both lists must END WITH EOSE (`requireEose`): a timeout or a
+   * relay `CLOSED` (e.g. "auth-required:" while a just-switched session is
+   * still authenticating) used to resolve as an EMPTY roster, which every
+   * screen then rendered as "You're not a member of this channel yet" for a
+   * channel the user belongs to. Now it rejects, and `channelAccess.ts` shows
+   * that as "checking"/"error" — never as a negative.
+   */
   async fetchMembers(channelId: string): Promise<Member[]> {
     const [adminEvents, memberEvents] = await Promise.all([
-      fetchEventsOnce([memberListFilterForChannel(channelId, KIND_NIP29_GROUP_ADMINS)]),
-      fetchEventsOnce([memberListFilterForChannel(channelId, KIND_NIP29_GROUP_MEMBERS)]),
+      fetchEventsOnce([memberListFilterForChannel(channelId, KIND_NIP29_GROUP_ADMINS)], { requireEose: true }),
+      fetchEventsOnce([memberListFilterForChannel(channelId, KIND_NIP29_GROUP_MEMBERS)], { requireEose: true }),
     ]);
 
     const roleByPubkey = new Map<string, Member["role"]>();
@@ -94,8 +104,17 @@ class ChannelService {
     await signAndPublish(buildJoinRequestEvent(channelId));
   }
 
+  /**
+   * NIP-29 kind:9022 with `["h", <channel uuid>]` — byte-for-byte what OLD BUZZ
+   * sends (desktop `events.rs` `build_leave`). A refusal carries the relay's
+   * reason, which is turned into a message the person can act on.
+   */
   async leaveChannel(channelId: string): Promise<void> {
-    await signAndPublish(buildLeaveRequestEvent(channelId));
+    try {
+      await signAndPublish(buildLeaveRequestEvent(channelId));
+    } catch (err) {
+      throw leaveRefusal(err);
+    }
   }
 
   /** Adds a member to the channel, or changes an existing member's role (kind:9000). */
@@ -110,3 +129,27 @@ class ChannelService {
 }
 
 export const channelService = new ChannelService();
+
+/**
+ * The relay's kind:9022 refusals (`buzz-relay` `side_effects.rs` 9022 arm,
+ * `channel_authz::decide_self_departure`, ingest membership gate), each mapped
+ * to what the person can do about it. Anything unrecognised keeps the relay's
+ * own words rather than a generic "not accepted".
+ */
+export function leaveRefusal(err: unknown): unknown {
+  if (!(err instanceof AppError) || err.code !== "relay_rejected") return err;
+  const reason = err.cause instanceof Error ? err.cause.message : String(err.cause ?? "");
+  const say = (message: string) => new AppError("relay_rejected", message, err.cause);
+  if (/channel is archived/i.test(reason)) {
+    return say("This channel is archived, so it can't be left or changed.");
+  }
+  if (/last owner/i.test(reason)) {
+    return say(
+      "You can't leave this channel because you are its only owner. Transfer ownership or add another owner first.",
+    );
+  }
+  if (/not an active member|not a channel member/i.test(reason)) {
+    return say("You're not a member of this channel anymore.");
+  }
+  return reason ? say(`The server refused: ${reason}`) : err;
+}

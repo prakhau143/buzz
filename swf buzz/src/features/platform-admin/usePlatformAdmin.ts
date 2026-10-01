@@ -32,7 +32,7 @@ export function useAdminReports(status?: string) {
   });
 
   function invalidate() {
-    return queryClient.invalidateQueries({ queryKey: ["admin-reports"] });
+    return queryClient.invalidateQueries({ queryKey: queryKeys.adminReportsAll() });
   }
 
   const resolveMutation = useMutation({

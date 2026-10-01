@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CloseButton from "@/components/CloseButton.vue";
 /**
  * Community-wide administration — members/roles, moderation, invites.
  * Deliberately separate from channel conversation UI (`ChannelDetailsPanel.vue`
@@ -8,22 +9,35 @@
  * the biggest UX issue with the previous layout.
  */
 import { ref } from "vue";
+import CommunityMembersPanel from "@/features/community-members/ui/CommunityMembersPanel.vue";
 import CommunityMembersPanelHttp from "@/features/communities/ui/CommunityMembersPanelHttp.vue";
+import CreateRelayInvitePanel from "@/features/communities/ui/CreateRelayInvitePanel.vue";
+import { useSessionStore } from "@/stores/session";
 import ModerationQueuePanel from "@/features/moderation/ui/ModerationQueuePanel.vue";
 import CreateInvitePanel from "@/features/communities/ui/CreateInvitePanel.vue";
+import { useEscapeKey } from "@/composables/useEscapeKey";
+import { useFocusTrap } from "@/composables/useFocusTrap";
 
 defineProps<{ selectedChannelId: string | null }>();
-defineEmits<{ close: [] }>();
+const emit = defineEmits<{ close: [] }>();
+useEscapeKey(() => emit("close"));
+const dialog = ref<HTMLElement | null>(null);
+useFocusTrap(dialog);
+// The local identity (no Okta, no backend session) is served by the relay itself:
+// members and roles come from relay_members, invites from the relay's invite API.
+// The HTTP panels remain for legacy Okta/dev sessions until they are removed.
+const session = useSessionStore();
+const isLocal = session.authMode === "local";
 
 const tab = ref<"community" | "moderation" | "invites">("community");
 </script>
 
 <template>
   <div class="modal-overlay" @click.self="$emit('close')">
-    <div class="modal-card" role="dialog" aria-modal="true" aria-label="Community management">
+    <div ref="dialog" class="modal-card" role="dialog" aria-modal="true" aria-label="Community management">
       <div class="modal-header">
         <h2>Community</h2>
-        <button type="button" class="close-button" aria-label="Close" @click="$emit('close')">✕</button>
+        <CloseButton @click="$emit('close')" />
       </div>
 
       <div class="tabs">
@@ -39,9 +53,15 @@ const tab = ref<"community" | "moderation" | "invites">("community");
       </div>
 
       <div class="tab-body">
-        <CommunityMembersPanelHttp v-if="tab === 'community'" />
+        <template v-if="tab === 'community'">
+          <CommunityMembersPanel v-if="isLocal" />
+          <CommunityMembersPanelHttp v-else />
+        </template>
         <ModerationQueuePanel v-else-if="tab === 'moderation'" />
-        <CreateInvitePanel v-else-if="tab === 'invites'" />
+        <template v-else-if="tab === 'invites'">
+          <CreateRelayInvitePanel v-if="isLocal" />
+          <CreateInvitePanel v-else />
+        </template>
       </div>
     </div>
   </div>
@@ -55,7 +75,7 @@ const tab = ref<"community" | "moderation" | "invites">("community");
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: var(--z-modal);
 }
 
 .modal-card {
@@ -68,6 +88,29 @@ const tab = ref<"community" | "moderation" | "invites">("community");
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
+  /* The roster can be long and its rows have their own overflow handling —
+     without this the flex child refuses to shrink and the card overflows the
+     viewport instead of scrolling internally. */
+  min-height: 0;
+}
+
+/*
+  Mobile: full-screen, per the design spec. A 560px card inside a 390px
+  viewport is what produced the horizontal overflow on phones — `max-width`
+  alone still left the side gutters and rounded corners fighting for room.
+*/
+@media (max-width: 768px) {
+  .modal-overlay {
+    align-items: stretch;
+    justify-content: stretch;
+  }
+  .modal-card {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+  }
 }
 
 .modal-header {
@@ -117,6 +160,25 @@ const tab = ref<"community" | "moderation" | "invites">("community");
 
 .tab-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  /* Long pubkeys and invite links must wrap rather than widen the modal — the
+     usual source of horizontal overflow at narrow widths. */
+  overflow-x: hidden;
+}
+
+/* The tab strip scrolls rather than wrapping when the three labels no longer
+   fit, so the header height stays predictable. */
+@media (max-width: 430px) {
+  .tabs {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .tab {
+    flex: 0 0 auto;
+  }
 }
 </style>

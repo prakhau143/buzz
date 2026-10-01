@@ -32,7 +32,41 @@ sha2 = "0.10"
 base64 = "0.22"
 url = "2"
 jsonwebtoken = "9"
+# Local Nostr identity (src/identity/): key generation, BIP-340 event signing,
+# NIP-49 (`nip49`) password-encrypted key backup, and NIP-44 (`nip44`) payload
+# encryption. NIP-44 is required by NIP-RS read state (kind:30078), whose content
+# is encrypted to the author's own keypair. Same crate/version as the reference
+# Buzz desktop.
+nostr = { version = "0.44", features = ["nip49", "nip44"] }
+tauri-plugin-notification = "2"
+tauri-plugin-updater = "2"
+buzz-core = { version = "0.1.0", path = "../../buzz/crates/buzz-core" }
+tokio = { version = "1.53.1", features = ["sync", "time", "macros"] }
+tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3.34"
+zeroize = "1.9.0"
 
+# Native Windows toasts with a click (activation) callback — the same library
+# tauri-plugin-notification uses internally, which exposes no click handler.
+[target.'cfg(windows)'.dependencies]
+tauri-winrt-notification = "0.8"
+# Reads the real OS notification setting (ToastNotifier.Setting); same
+# version/features tauri-winrt-notification already builds.
+windows = { version = "0.62", features = ["UI_Notifications"] }
+
+# scrypt (NIP-49 key backup, cost 2^18) is unusably slow unoptimised. Build only
+# the key-derivation crates optimised in dev/test profiles; everything else keeps
+# fast debug builds.
+[profile.dev.package.scrypt]
+opt-level = 3
+[profile.dev.package.salsa20]
+opt-level = 3
+[profile.dev.package.pbkdf2]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.hmac]
+opt-level = 3
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
@@ -41,3 +75,6 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = ["rt", "macros"] }

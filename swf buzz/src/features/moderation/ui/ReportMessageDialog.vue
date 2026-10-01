@@ -5,10 +5,15 @@ import BaseButton from "@/components/BaseButton.vue";
 import { useSubmitReport } from "../useSubmitReport";
 import { userMessageFor } from "@/services/errors";
 import { REPORT_TYPES, type ReportType } from "@/protocol/moderation";
+import { useEscapeKey } from "@/composables/useEscapeKey";
+import { useFocusTrap } from "@/composables/useFocusTrap";
 import type { Message } from "@/types/domain";
 
 const props = defineProps<{ message: Message }>();
 const emit = defineEmits<{ close: [] }>();
+useEscapeKey(() => emit("close"));
+const dialog = ref<HTMLElement | null>(null);
+useFocusTrap(dialog);
 
 const reportType = ref<ReportType>("other");
 const note = ref("");
@@ -36,7 +41,7 @@ async function handleSubmit() {
 
 <template>
   <div class="dialog-overlay" @click.self="emit('close')">
-    <div class="dialog-card" role="dialog" aria-modal="true" aria-label="Report message">
+    <div ref="dialog" class="dialog-card" role="dialog" aria-modal="true" aria-label="Report message">
       <h2>Report this message</h2>
 
       <template v-if="isSuccess">
@@ -90,7 +95,7 @@ async function handleSubmit() {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: var(--z-modal);
 }
 
 .dialog-card {

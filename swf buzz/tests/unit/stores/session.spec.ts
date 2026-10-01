@@ -18,7 +18,7 @@ describe("useSessionStore", () => {
   it("setIdentity moves to resolvingIdentity but is not yet ready", () => {
     const store = useSessionStore();
     store.setIdentity({
-      authMode: "development",
+      authMode: "local",
       employeeEmail: "dev@local.test",
       applicationUserId: null,
       pubkey: "pk123",
@@ -26,7 +26,7 @@ describe("useSessionStore", () => {
     expect(store.authStatus).toBe("resolvingIdentity");
     expect(store.isAuthenticated).toBe(true); // no longer unauthenticated/error
     expect(store.isReady).toBe(false); // role not resolved yet — the dashboard must not render
-    expect(store.authMode).toBe("development");
+    expect(store.authMode).toBe("local");
     expect(store.employeeEmail).toBe("dev@local.test");
     expect(store.pubkey).toBe("pk123");
   });
@@ -34,7 +34,7 @@ describe("useSessionStore", () => {
   it("setCommunityRole completes the flow and marks the session ready", () => {
     const store = useSessionStore();
     store.setIdentity({
-      authMode: "development",
+      authMode: "local",
       employeeEmail: "dev@local.test",
       applicationUserId: null,
       pubkey: "pk123",
@@ -48,7 +48,7 @@ describe("useSessionStore", () => {
   it("setCommunityRole(null) still reaches ready — no role is a valid resolved state", () => {
     const store = useSessionStore();
     store.setIdentity({
-      authMode: "development",
+      authMode: "local",
       employeeEmail: "dev@local.test",
       applicationUserId: null,
       pubkey: "pk123",
@@ -76,6 +76,25 @@ describe("useSessionStore", () => {
     expect(store.authStatus).toBe("authError");
     expect(store.isAuthenticated).toBe(false);
     expect(store.authError).toBe("Can't reach the Buzz server right now.");
+  });
+
+  it("a new attempt clears the previous attempt's error, so it cannot linger on a session that then succeeds", () => {
+    const store = useSessionStore();
+    store.setAuthError("This identity isn't a member of this community yet.");
+    expect(store.authError).not.toBeNull();
+
+    store.setIdentity({ authMode: "local", employeeEmail: null, applicationUserId: null, pubkey: "a".repeat(64) });
+    store.setCommunityRole("member");
+
+    expect(store.authStatus).toBe("ready");
+    expect(store.authError).toBeNull();
+  });
+
+  it("accepts the 'local' auth mode (OLD-BUZZ-style identity, no Okta)", () => {
+    const store = useSessionStore();
+    store.setIdentity({ authMode: "local", employeeEmail: null, applicationUserId: null, pubkey: "a".repeat(64) });
+    expect(store.authMode).toBe("local");
+    expect(store.applicationUserId).toBeNull();
   });
 
   it("clearSession resets to signed-out state from any prior state", () => {

@@ -1,24 +1,30 @@
 <script setup lang="ts">
+import CloseButton from "@/components/CloseButton.vue";
 import { ref } from "vue";
 import StateView from "@/components/StateView.vue";
 import ChannelMemberSearchRow from "./ChannelMemberSearchRow.vue";
+import { useEscapeKey } from "@/composables/useEscapeKey";
+import { useFocusTrap } from "@/composables/useFocusTrap";
 import type { Member } from "@/types/domain";
 
 defineProps<{ members: Member[]; isLoading: boolean; isError: boolean }>();
-defineEmits<{ close: []; "select-member": [pubkey: string]; retry: [] }>();
+const emit = defineEmits<{ close: []; "select-member": [pubkey: string]; retry: [] }>();
 
 const search = ref("");
+useEscapeKey(() => emit("close"));
+const dialog = ref<HTMLElement | null>(null);
+useFocusTrap(dialog);
 </script>
 
 <template>
   <div class="modal-overlay" @click.self="$emit('close')">
-    <div class="modal-card" role="dialog" aria-modal="true" aria-label="Members">
+    <div ref="dialog" class="modal-card" role="dialog" aria-modal="true" aria-label="Members">
       <div class="modal-header">
         <div>
           <h2>Members</h2>
           <p class="count">{{ members.length }} member{{ members.length === 1 ? "" : "s" }}</p>
         </div>
-        <button type="button" class="close-button" aria-label="Close" @click="$emit('close')">✕</button>
+        <CloseButton @click="$emit('close')" />
       </div>
 
       <input v-model="search" class="search-input" type="text" placeholder="Search members" />
@@ -48,7 +54,7 @@ const search = ref("");
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: var(--z-modal);
 }
 
 .modal-card {

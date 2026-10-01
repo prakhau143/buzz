@@ -16,7 +16,9 @@ export async function signAndPublish(event: UnsignedEvent): Promise<SignedEvent>
 /**
  * Same as `signAndPublish`, but also returns the relay's OK "reason" string —
  * needed for the few event kinds that encode a response in it, e.g. kind:41010
- * (DM open) returns `{"channel_id": "..."}"`. See docs/PROTOCOL_IMPLEMENTATION_REFERENCE.md §8a.
+ * (DM open) answers `response:{"channel_id":"…","created":true}`. The reason is
+ * returned verbatim, prefix and all; decode it with `parseCommandResponse`
+ * rather than `JSON.parse`. See docs/PROTOCOL_IMPLEMENTATION_REFERENCE.md §8a.
  */
 export async function signAndPublishWithResponse(
   event: UnsignedEvent,

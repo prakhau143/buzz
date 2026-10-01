@@ -17,6 +17,30 @@ A change is not "done" until all of `typecheck`, `lint`, `test`, and `build` pas
 the feature is correct, and `test` passing does not mean the app compiles cleanly for every route
 (`vue-tsc` type-checks the whole project, not just files touched by a test).
 
+## Current status (Phase 5, 2026-09-28)
+
+| Suite | Command | Status |
+|---|---|---|
+| Unit + component (vitest, jsdom) | `npm test` | **1088 tests / 106 files**, run 3× consecutively for flakiness (see `docs/PHASE_5_CLOSURE_REPORT.md`) |
+| Rust (`src-tauri`) | `cargo test` | 78 tests (identity storage/import/switch/delete, key-input normalisation, NIP-44/49, deep-link parsing incl. hostile `join`/`connect` links) |
+| Real-relay E2E | `npx vitest run --config vitest.e2e.config.ts` | Needs a local `buzz-relay` (`ws://localhost:3000`) **and** test keys; without them the suites are skipped, not failed |
+| Real OLD BUZZ relay (read-only) | out-of-repo probe that signs with the keyring identity and prints only public data | member / non-member matrix; see `docs/COMMUNITY_CONNECTION.md` |
+
+**E2E prerequisites.** `SWF_E2E_OPERATOR_SK` (hex secret of a *throwaway* key listed in the
+local relay's `RELAY_OPERATOR_PUBKEYS`), plus `SWF_E2E_MEMBER_SK` for the bootstrap suite. These
+are local test credentials. Never use a real person's key, and remove the throwaway pubkey from
+`RELAY_OPERATOR_PUBKEYS` afterwards. Node ≥ 22 provides the `WebSocket` global the suites need
+(Node 20 needed a shim, as described in older phase docs).
+
+**Desktop-only UI.** Every authenticated screen sits behind the Tauri identity boundary: a
+browser at `localhost:1420` only shows the "open the desktop app" gate. Responsive layout,
+keyboard walkthroughs and visual checks therefore need the real desktop window. Unit tests guard
+the behavior (focus, Escape, aria, scroll, popover placement), but a human pass is still
+required.
+
+> The sections below are the original Phase 1–3 notes, kept for history. Counts in them are
+> out of date.
+
 ## What's covered today (`tests/unit/`, 62 tests as of this writing)
 
 - **Protocol layer** (`tests/unit/protocol/`) — the highest-value tests in this codebase, since
@@ -40,9 +64,8 @@ the feature is correct, and `test` passing does not mean the app compiles cleanl
     new live reaction.
   - `dm.spec.ts` — `Kind41010Transport.open()`'s parsing of the relay's OK-reason JSON
     (`{"channel_id": ...}`), including the missing-`channel_id` and non-JSON-reason error paths.
-  - `agents.spec.ts` — `useAgentActivity`'s precedence logic (a real kind:24200 observer-frame
-    signal wins over the kind:20002 typing-indicator fallback; out-of-scope agents are excluded
-    even if typing).
+  - ~~`agents.spec.ts`~~ — removed with the agent-activity feature (2026-09-28); the product
+    boundary is now guarded by `features/productBoundary.spec.ts`.
 - **Stores** (`tests/unit/stores/`) — `connection.spec.ts` (status transitions, reconnect-attempt
   reset-on-connect), `session.spec.ts` (auth state set/clear).
 - **Signing** (`tests/unit/signing/`) — `signingService.dev.spec.ts` exercises `DevSigningService`

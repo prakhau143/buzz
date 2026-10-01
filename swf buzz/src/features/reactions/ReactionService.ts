@@ -7,6 +7,7 @@ import { signAndPublish } from "@/services/publish";
 import {
   buildReactionEvent,
   buildReactionFilter,
+  buildRemoveReactionEvent,
   parseReactionEvent,
   type ParsedReactionEvent,
 } from "@/protocol/reactions";
@@ -31,6 +32,7 @@ function groupReactions(
     if (existing) {
       if (!existing.reactorPubkeys.includes(event.reactorPubkey)) {
         existing.reactorPubkeys.push(event.reactorPubkey);
+        existing.reactorEventIds[event.reactorPubkey] = event.id;
         existing.count += 1;
         if (event.reactorPubkey === myPubkey) existing.reactedByMe = true;
       }
@@ -40,6 +42,7 @@ function groupReactions(
         count: 1,
         reactedByMe: event.reactorPubkey === myPubkey,
         reactorPubkeys: [event.reactorPubkey],
+        reactorEventIds: { [event.reactorPubkey]: event.id },
       });
     }
   }
@@ -68,6 +71,7 @@ export function applyReaction(
         count: 1,
         reactedByMe: event.reactorPubkey === myPubkey,
         reactorPubkeys: [event.reactorPubkey],
+        reactorEventIds: { [event.reactorPubkey]: event.id },
       },
     ]);
     return next;
@@ -81,10 +85,57 @@ export function applyReaction(
     count: existing.count + 1,
     reactedByMe: existing.reactedByMe || event.reactorPubkey === myPubkey,
     reactorPubkeys: [...existing.reactorPubkeys, event.reactorPubkey],
+    reactorEventIds: { ...existing.reactorEventIds, [event.reactorPubkey]: event.id },
   };
   const nextForTarget = [...existingForTarget];
   nextForTarget[idx] = updated;
   next.set(event.targetEventId, nextForTarget);
+  return next;
+}
+
+/**
+ * Removes `myPubkey`'s own reaction of `emoji` on `targetEventId` from local
+ * state (used optimistically after publishing the kind:5 retraction — see
+ * ReactionService.unreact). The relay excludes soft-deleted events from future
+ * REQ responses, but does not fan out a "reaction removed" signal to other
+ * subscribers (only the bare kind:7 add is delivered live) — see
+ * docs/PHASE_3_IMPLEMENTATION_AUDIT.md §8 for that known limitation.
+ */
+export function retractReactionLocally(
+  current: ReactionsByMessage,
+  targetEventId: string,
+  emoji: string,
+  myPubkey: string,
+): ReactionsByMessage {
+  const existingForTarget = current.get(targetEventId);
+  if (!existingForTarget) return current;
+  const idx = existingForTarget.findIndex((r) => r.emoji === emoji);
+  if (idx === -1) return current;
+  const existing = existingForTarget[idx];
+  if (!existing.reactorPubkeys.includes(myPubkey)) return current;
+
+  const next = new Map(current);
+  const remainingPubkeys = existing.reactorPubkeys.filter((p) => p !== myPubkey);
+  const remainingEventIds = { ...existing.reactorEventIds };
+  delete remainingEventIds[myPubkey];
+
+  if (remainingPubkeys.length === 0) {
+    next.set(
+      targetEventId,
+      existingForTarget.filter((_, i) => i !== idx),
+    );
+    return next;
+  }
+
+  const nextForTarget = [...existingForTarget];
+  nextForTarget[idx] = {
+    ...existing,
+    count: remainingPubkeys.length,
+    reactedByMe: false,
+    reactorPubkeys: remainingPubkeys,
+    reactorEventIds: remainingEventIds,
+  };
+  next.set(targetEventId, nextForTarget);
   return next;
 }
 
@@ -116,6 +167,19 @@ class ReactionService {
 
   async react(targetEventId: string, emoji: string): Promise<void> {
     await signAndPublish(buildReactionEvent({ targetEventId, emoji }));
+  }
+
+  /**
+   * Retracts one of my own reactions via a standard NIP-09 kind:5 deletion
+   * referencing the reaction's own event id (not the message's). Confirmed
+   * supported server-side: buzz-relay's generic kind:5 handler
+   * (`validate_standard_deletion_event`, crates/buzz-relay/src/handlers/side_effects.rs:233)
+   * accepts any event kind's self-authored deletion via an `e`-tag target
+   * lookup — there is no reaction-specific "unreact" kind, this is the
+   * standard mechanism. See docs/PHASE_3_IMPLEMENTATION_AUDIT.md §8.
+   */
+  async unreact(reactionEventId: string): Promise<void> {
+    await signAndPublish(buildRemoveReactionEvent(reactionEventId));
   }
 }
 

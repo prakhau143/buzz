@@ -10,8 +10,21 @@ import type { RelayMemberRole } from "@/protocol/relayMembers";
 export function useModerationActions() {
   const queryClient = useQueryClient();
 
-  function invalidateRestrictions() {
-    return queryClient.invalidateQueries({ queryKey: queryKeys.moderationRestrictions() });
+  /**
+   * Every moderation action writes a `moderation_actions` row that the audit
+   * log reads, so both queries are stale afterwards.
+   *
+   * The audit key used to be left out — only restrictions were invalidated —
+   * so the Moderation tab kept showing pre-action data until its 15 s
+   * `staleTime` lapsed or the modal was remounted. A ban would appear to have
+   * done nothing. (`useModerationQueue.ts` already did this correctly for
+   * report resolution, which is what made the omission visible.)
+   */
+  function invalidateAfterAction() {
+    return Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.moderationRestrictions() }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.moderationAudit() }),
+    ]);
   }
 
   const banMutation = useMutation({
@@ -22,14 +35,14 @@ export function useModerationActions() {
       expiresAt?: number;
       reason?: string;
     }) => moderationService.banMember(params),
-    onSuccess: () => void invalidateRestrictions(),
+    onSuccess: () => void invalidateAfterAction(),
     onError: (err) => logError("useModerationActions.ban", err),
   });
 
   const unbanMutation = useMutation({
     mutationFn: (params: { pubkey: string; actingRole: RelayMemberRole | null }) =>
       moderationService.unbanMember(params),
-    onSuccess: () => void invalidateRestrictions(),
+    onSuccess: () => void invalidateAfterAction(),
     onError: (err) => logError("useModerationActions.unban", err),
   });
 
@@ -41,14 +54,14 @@ export function useModerationActions() {
       expiresAt: number;
       reason?: string;
     }) => moderationService.timeoutMember(params),
-    onSuccess: () => void invalidateRestrictions(),
+    onSuccess: () => void invalidateAfterAction(),
     onError: (err) => logError("useModerationActions.timeout", err),
   });
 
   const untimeoutMutation = useMutation({
     mutationFn: (params: { pubkey: string; actingRole: RelayMemberRole | null }) =>
       moderationService.untimeoutMember(params),
-    onSuccess: () => void invalidateRestrictions(),
+    onSuccess: () => void invalidateAfterAction(),
     onError: (err) => logError("useModerationActions.untimeout", err),
   });
 
